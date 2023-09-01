@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = "linux-arm64-openssl-3.0.x"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model GroceryTrip {
+  id          Int      @id @default(autoincrement())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  name        String
+  description String   @default("")
+  userId      Int
+  User        User     @relation(fields: [userId], references: [id])
+  Item        Item[]
+}
+
+model Item {
+  id              Int            @id @default(autoincrement())
+  name            String
+  description     String         @default("")
+  price           Float
+  quantity        Int
+  unit            String         @default("")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime
+  status          ItemStatusType @default(FRESH)
+  userId          Int
+  groceryTripId   Int
+  percentConsumed Decimal        @default(0)
+  GroceryTrip     GroceryTrip    @relation(fields: [groceryTripId], references: [id])
+  User            User           @relation(fields: [userId], references: [id])
+  Job             Job[]
+  Reminder        Reminder[]
+  ItemType        ItemType[]
+}
+
+model ItemType {
+  id                          Int      @id @default(autoincrement())
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime
+  name                        String   @unique
+  storage_advice              String
+  suggested_life_span_seconds BigInt
+  Item                        Item[]
+}
+
+model Job {
+  id           Int            @id @default(autoincrement())
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime
+  scheduledFor DateTime
+  executedAt   DateTime
+  itemId       Int
+  payload      ItemStatusType
+  Item         Item           @relation(fields: [itemId], references: [id])
+}
+
+model Reminder {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+  time      DateTime
+  itemId    Int
+  userId    Int
+  Item      Item     @relation(fields: [itemId], references: [id])
+  User      User     @relation(fields: [userId], references: [id])
+}
+
+model Session {
+  id                 Int       @id @default(autoincrement())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime
+  expiresAt          DateTime?
+  handle             String    @unique
+  hashedSessionToken String?
+  antiCSRFToken      String?
+  publicData         String?
+  privateData        String?
+  userId             Int?
+  User               User?     @relation(fields: [userId], references: [id])
+}
+
+model Token {
+  id          Int       @id @default(autoincrement())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime
+  hashedToken String
+  type        TokenType
+  expiresAt   DateTime
+  sentTo      String
+  userId      Int
+  User        User      @relation(fields: [userId], references: [id])
+
+  @@unique([hashedToken, type])
+}
+
+model User {
+  id             Int           @id @default(autoincrement())
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime
+  firstName      String
+  lastName       String
+  email          String        @unique
+  hashedPassword String?
+  role           String        @default("USER")
+  GroceryTrip    GroceryTrip[]
+  Item           Item[]
+  Reminder       Reminder[]
+  Session        Session[]
+  Token          Token[]
+}
+
+enum ItemStatusType {
+  BAD
+  EATEN
+  FRESH
+  OLD
+}
+
+enum TokenType {
+  RESET_PASSWORD
+}

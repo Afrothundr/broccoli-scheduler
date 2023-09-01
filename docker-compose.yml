@@ -1,0 +1,41 @@
+version: "1"
+services:
+  broccoli-scheduler:
+    container_name: broccoli-scheduler
+    ports:
+      - 5001:5001
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    volumes:
+      - ./src:/home/node/app/src
+      - ./nodemon.json:/home/node/app/nodemon.json
+    command: npm run scheduler
+
+    env_file:
+      - .env
+    depends_on:
+      - redis
+  broccoli-worker:
+    container_name: broccoli-worker
+    ports:
+      - 5002:5002
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    volumes:
+      - ./src:/home/node/app/src
+      - ./nodemon.json:/home/node/app/nodemon.json
+    command: npm run worker
+
+    env_file:
+      - .env
+    depends_on:
+      - redis
+  redis:
+    container_name: redis
+    image: redis
+    ports:
+      - 6379:6379
