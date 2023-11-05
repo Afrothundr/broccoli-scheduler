@@ -9,12 +9,11 @@
   "scripts": {
     "scheduler": "nodemon src/app",
     "worker": "ts-node src/worker",
-    "build": "tsc -p ."
+    "build": "tsc",
+    "start": "tsc && node dist/app.js"
   },
   "dependencies": {
-    "@bull-board/express": "^5.9.1",
     "@prisma/client": "^5.2.0",
-    "bull": "^4.11.4",
     "bullmq": "^4.12.8",
     "cors": "^2.8.5",
     "dayjs": "^1.11.8",

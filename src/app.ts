@@ -1,6 +1,3 @@
-import { createBullBoard } from "@bull-board/api";
-import { BullAdapter } from "@bull-board/api/bullAdapter";
-import { ExpressAdapter } from "@bull-board/express";
 import { Queue } from "bullmq";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -22,16 +19,7 @@ const queues = {
   }),
 };
 
-const serverAdapter = new ExpressAdapter();
-serverAdapter.setBasePath("/admin/queues");
-
-createBullBoard({
-  queues: [new BullAdapter(queues.itemUpdater)],
-  serverAdapter: serverAdapter,
-});
-
 const app = express();
-app.use("/admin/queues", serverAdapter.getRouter());
 
 // Utilities
 
@@ -63,9 +51,6 @@ const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
     app.listen(process.env.PORT, async () => {
       console.log(
         `Server running at ${process.env.BASE_URL}:${process.env.PORT}`
-      );
-      console.log(
-        `For the UI, open http://${process.env.BASE_URL}:${process.env.PORT}/admin/queues`
       );
       await client.connect();
     });
