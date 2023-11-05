@@ -14,8 +14,6 @@ export const redisOptions = {
 
 const client = createClient({
   url: process.env.REDIS_PRIVATE_URL,
-  username: process.env.REDISUSER,
-  password: process.env.REDISPASSWORD,
 });
 
 const queues = {
