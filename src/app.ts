@@ -14,6 +14,8 @@ export const redisOptions = {
 
 const client = createClient({
   url: process.env.REDIS_PRIVATE_URL,
+  username: process.env.REDISUSER,
+  password: process.env.REDISPASSWORD,
 });
 
 const queues = {
@@ -64,4 +66,5 @@ const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
 
 client.on("error", (err) => {
   console.log("Error occurred while connecting or accessing redis server", err);
+  throw err;
 });
