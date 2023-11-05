@@ -7,10 +7,13 @@ import { WorkerJob, jobTypes } from "./jobs";
 import { QUEUE_TYPES } from "./types";
 dotenv.config();
 
-export const redisOptions = { host: process.env.REDIS_HOST, port: 6379 };
+export const redisOptions = {
+  host: process.env.REDISHOST ?? "localhost",
+  port: parseInt(process.env.REDISPORT ?? "6379"),
+};
 
 const client = createClient({
-  url: `redis://@${redisOptions.host}:${redisOptions.port}`,
+  url: process.env.REDIS_PRIVATE_URL,
 });
 
 const queues = {
