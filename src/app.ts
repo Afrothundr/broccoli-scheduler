@@ -10,6 +10,7 @@ dotenv.config();
 export const redisOptions = {
   host: process.env.REDISHOST ?? "localhost",
   port: parseInt(process.env.REDISPORT ?? "6379"),
+  password: process.env.REDISPASSWORD,
 };
 
 const client = createClient({
@@ -20,18 +21,18 @@ client.on("error", (err) => {
   console.error("Redis Error: " + err);
 });
 
-// const queues = {
-//   itemUpdater: new Queue(QUEUE_TYPES.ITEM_UPDATER, {
-//     connection: redisOptions,
-//   }),
-// };
+const queues = {
+  itemUpdater: new Queue(QUEUE_TYPES.ITEM_UPDATER, {
+    connection: redisOptions,
+  }),
+};
 
 const app = express();
 
 // Utilities
 
-// const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
-//   await queues.itemUpdater.add(job.type, job, { delay });
+const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
+  await queues.itemUpdater.add(job.type, job, { delay });
 
 (async () => {
   try {
@@ -43,16 +44,16 @@ const app = express();
         res
       ) => {
         const { ids, status, delay } = req.body;
-        // await addJobToItemUpdaterQueue(
-        //   {
-        //     type: jobTypes.ITEM_UPDATER,
-        //     data: { ids, status },
-        //   },
-        //   delay
-        // );
-        // res.status(200).json({
-        //   queued: true,
-        // });
+        await addJobToItemUpdaterQueue(
+          {
+            type: jobTypes.ITEM_UPDATER,
+            data: { ids, status },
+          },
+          delay
+        );
+        res.status(200).json({
+          queued: true,
+        });
       }
     );
     app.listen(process.env.PORT, async () => {
