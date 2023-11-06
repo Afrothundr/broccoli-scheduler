@@ -19,7 +19,7 @@
     "dayjs": "^1.11.8",
     "dotenv": "^16.1.4",
     "express": "^4.18.2",
-    "redis": "^4.6.8"
+    "redis": "^4.6.10"
   },
   "devDependencies": {
     "@types/cors": "^2.8.13",
