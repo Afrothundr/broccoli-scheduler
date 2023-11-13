@@ -39,12 +39,16 @@ const workerHandler = async (job: Job<WorkerJob>) => {
   switch (job.data.type) {
     case jobTypes.ITEM_UPDATER: {
       const { ids, status } = job.data.data;
-      console.log(`Starting to update items: ${ids}`);
-      await prisma.item.updateMany({
-        where: { id: { in: ids } },
-        data: { status: status as ItemStatusType },
-      });
-      console.log(`Completed Updates on items: ${ids} => status ${status}`);
+      try {
+        console.log(`Starting to update items: ${ids}`);
+        await prisma.item.updateMany({
+          where: { id: { in: ids } },
+          data: { status: status as ItemStatusType },
+        });
+        console.log(`Completed Updates on items: ${ids} => status ${status}`);
+      } catch (err) {
+        console.error(`Problem updating item: ${err}`);
+      }
       return;
     }
   }

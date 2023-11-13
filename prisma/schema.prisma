@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
@@ -9,14 +9,15 @@ datasource db {
 }
 
 model GroceryTrip {
-  id          Int      @id @default(autoincrement())
-  createdAt   DateTime @default(now())
+  id          Int       @id @default(autoincrement())
+  createdAt   DateTime  @default(now())
   updatedAt   DateTime
   name        String
-  description String   @default("")
+  description String    @default("")
   userId      Int
-  User        User     @relation(fields: [userId], references: [id])
+  User        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   Item        Item[]
+  Receipt     Receipt[]
 }
 
 model Item {
@@ -29,14 +30,13 @@ model Item {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime
   status          ItemStatusType @default(FRESH)
+  percentConsumed Decimal        @default(0)
   userId          Int
   groceryTripId   Int
-  percentConsumed Decimal        @default(0)
-  GroceryTrip     GroceryTrip    @relation(fields: [groceryTripId], references: [id])
-  User            User           @relation(fields: [userId], references: [id])
-  Job             Job[]
+  GroceryTrip     GroceryTrip    @relation(fields: [groceryTripId], references: [id], onDelete: Cascade)
+  User            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   Reminder        Reminder[]
-  ItemType        ItemType[]
+  ItemType        ItemType[]     @relation("ItemToItemType")
 }
 
 model ItemType {
@@ -44,20 +44,10 @@ model ItemType {
   createdAt                   DateTime @default(now())
   updatedAt                   DateTime
   name                        String   @unique
+  category                    String
   storage_advice              String
-  suggested_life_span_seconds BigInt
-  Item                        Item[]
-}
-
-model Job {
-  id           Int            @id @default(autoincrement())
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime
-  scheduledFor DateTime
-  executedAt   DateTime
-  itemId       Int
-  payload      ItemStatusType
-  Item         Item           @relation(fields: [itemId], references: [id])
+  suggested_life_span_seconds Int
+  Item                        Item[]   @relation("ItemToItemType")
 }
 
 model Reminder {
@@ -67,8 +57,8 @@ model Reminder {
   time      DateTime
   itemId    Int
   userId    Int
-  Item      Item     @relation(fields: [itemId], references: [id])
-  User      User     @relation(fields: [userId], references: [id])
+  Item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Session {
@@ -115,11 +105,20 @@ model User {
   Token          Token[]
 }
 
+model Receipt {
+  id            Int          @id @default(autoincrement())
+  url           String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime
+  groceryTripId Int?
+  GroceryTrip   GroceryTrip? @relation(fields: [groceryTripId], references: [id], onDelete: Cascade)
+}
+
 enum ItemStatusType {
   BAD
-  EATEN
-  FRESH
   OLD
+  FRESH
+  EATEN
 }
 
 enum TokenType {
