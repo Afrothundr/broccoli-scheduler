@@ -1,14 +1,15 @@
-import { Job, Queue, WorkerOptions, Worker } from "bullmq";
+import { Queue, WorkerOptions, Worker } from "bullmq";
 import cors from "cors";
 import dotenv from "dotenv";
 import express, { Request } from "express";
 import { WorkerJob, jobTypes } from "./jobs";
 import { QUEUE_TYPES } from "./types";
 import redis from "./redisConnection";
-import { PrismaClient, ItemStatusType } from "@prisma/client";
 import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
+import handleItemUpdate from "./workers/handleItemUpdate";
+
 dotenv.config();
 
 export const redisOptions = {
@@ -33,33 +34,12 @@ createBullBoard({
 
 const app = express();
 
-const prisma = new PrismaClient();
-
-const workerHandler = async (job: Job<WorkerJob>) => {
-  switch (job.data.type) {
-    case jobTypes.ITEM_UPDATER: {
-      const { ids, status } = job.data.data;
-      try {
-        console.log(`Starting to update items: ${ids}`);
-        await prisma.item.updateMany({
-          where: { id: { in: ids } },
-          data: { status: status as ItemStatusType },
-        });
-        console.log(`Completed Updates on items: ${ids} => status ${status}`);
-      } catch (err) {
-        console.error(`Problem updating item: ${err}`);
-      }
-      return;
-    }
-  }
-};
-
 const workerOptions: WorkerOptions = {
   connection: redisOptions,
 };
 
 try {
-  new Worker(QUEUE_TYPES.ITEM_UPDATER, workerHandler, workerOptions);
+  new Worker(QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
   console.log("started worker", QUEUE_TYPES.ITEM_UPDATER);
 } catch (err) {
   console.error(err);
