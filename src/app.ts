@@ -9,6 +9,7 @@ import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 import handleItemUpdate from "./workers/handleItemUpdate";
+import handleImageProcess from "./workers/handleImageProcess";
 
 dotenv.config();
 
@@ -20,6 +21,9 @@ export const redisOptions = {
 
 const queues = {
   itemUpdater: new Queue(QUEUE_TYPES.ITEM_UPDATER, {
+    connection: redis.duplicate(),
+  }),
+  imageProcessors: new Queue(QUEUE_TYPES.IMAGE_PROCESSOR, {
     connection: redis.duplicate(),
   }),
 };
@@ -40,7 +44,12 @@ const workerOptions: WorkerOptions = {
 
 try {
   new Worker(QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
-  console.log("started worker", QUEUE_TYPES.ITEM_UPDATER);
+  new Worker(QUEUE_TYPES.IMAGE_PROCESSOR, handleImageProcess, workerOptions);
+  console.log(
+    "started worker",
+    QUEUE_TYPES.ITEM_UPDATER,
+    QUEUE_TYPES.IMAGE_PROCESSOR
+  );
 } catch (err) {
   console.error(err);
 }
@@ -49,6 +58,9 @@ try {
 
 const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
   await queues.itemUpdater.add(job.type, job, { delay });
+
+const addJobToImageProcessingQueue = async (job: WorkerJob, delay: number) =>
+  await queues.imageProcessors.add(job.type, job, { delay });
 
 (async () => {
   try {
@@ -65,6 +77,29 @@ const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
             {
               type: jobTypes.ITEM_UPDATER,
               data: { ids, status },
+            },
+            delay
+          );
+          res.status(200).json({
+            queued: true,
+          });
+        } catch (err) {
+          return res.status(500).send("error in worker");
+        }
+      }
+    );
+    app.post(
+      "/receipts/process",
+      async (
+        req: Request<{ receiptId: number; url: string; delay: number }>,
+        res
+      ) => {
+        try {
+          const { receiptId, url, delay } = req.body;
+          await addJobToImageProcessingQueue(
+            {
+              type: jobTypes.IMAGE_PROCESSOR,
+              data: { receiptId, url },
             },
             delay
           );
