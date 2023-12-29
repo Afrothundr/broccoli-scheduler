@@ -9,6 +9,10 @@ import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 import handleItemUpdate from "./workers/handleItemUpdate";
+import handleImageProcess from "./workers/handleImageProcess";
+import updateReceipt, { ScrapedItem } from "./workers/updateReceipt";
+import passport from "passport";
+import { HeaderAPIKeyStrategy } from "passport-headerapikey";
 
 dotenv.config();
 
@@ -22,15 +26,32 @@ const queues = {
   itemUpdater: new Queue(QUEUE_TYPES.ITEM_UPDATER, {
     connection: redis.duplicate(),
   }),
+  imageProcessors: new Queue(QUEUE_TYPES.IMAGE_PROCESSOR, {
+    connection: redis.duplicate(),
+  }),
 };
 
 const serverAdapter = new ExpressAdapter();
 serverAdapter.setBasePath("/admin/queues");
 
 createBullBoard({
-  queues: [new BullMQAdapter(queues.itemUpdater)],
+  queues: [
+    new BullMQAdapter(queues.itemUpdater),
+    new BullMQAdapter(queues.imageProcessors),
+  ],
   serverAdapter: serverAdapter,
 });
+
+passport.use(
+  new HeaderAPIKeyStrategy(
+    { header: "x-api-key", prefix: "api-key-" },
+    false,
+    (apiKey, done) =>
+      process.env.API_KEYS?.includes(apiKey)
+        ? done(null, true)
+        : done(null, false)
+  )
+);
 
 const app = express();
 
@@ -40,7 +61,12 @@ const workerOptions: WorkerOptions = {
 
 try {
   new Worker(QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
-  console.log("started worker", QUEUE_TYPES.ITEM_UPDATER);
+  new Worker(QUEUE_TYPES.IMAGE_PROCESSOR, handleImageProcess, workerOptions);
+  console.log(
+    "started worker",
+    QUEUE_TYPES.ITEM_UPDATER,
+    QUEUE_TYPES.IMAGE_PROCESSOR
+  );
 } catch (err) {
   console.error(err);
 }
@@ -50,11 +76,20 @@ try {
 const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
   await queues.itemUpdater.add(job.type, job, { delay });
 
+const addJobToImageProcessingQueue = async (job: WorkerJob, delay: number) =>
+  await queues.imageProcessors.add(job.type, job, { delay });
+
+const authMiddleware = () =>
+  passport.authenticate("headerapikey", {
+    session: false,
+  });
+
 (async () => {
   try {
     app.use(express.json(), cors());
     app.post(
       "/items/update",
+      authMiddleware(),
       async (
         req: Request<{ ids: number[]; status: string; delay: number }>,
         res
@@ -76,7 +111,52 @@ const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
         }
       }
     );
+    app.post(
+      "/receipts/process",
+      authMiddleware(),
+      async (
+        req: Request<{ receiptId: number; url: string; delay: number }>,
+        res
+      ) => {
+        try {
+          const { receiptId, url, delay } = req.body;
+          await addJobToImageProcessingQueue(
+            {
+              type: jobTypes.IMAGE_PROCESSOR,
+              data: { receiptId, url },
+            },
+            delay
+          );
+          res.status(200).json({
+            queued: true,
+          });
+        } catch (err) {
+          return res.status(500).send("error in worker");
+        }
+      }
+    );
+    app.post(
+      "/receipts/callback",
+      authMiddleware(),
+      async (req: Request<{ receiptId: number; data: unknown }>, res) => {
+        try {
+          const { receiptId, data } = req.body;
+          const castedData = data as ScrapedItem[];
+          await updateReceipt({
+            receiptId,
+            data: castedData,
+          });
+          res.status(200).json({
+            success: true,
+          });
+        } catch (err) {
+          console.log(err);
+          return res.status(500).send("error in worker");
+        }
+      }
+    );
     app.use("/admin/queues", serverAdapter.getRouter());
+    app.use(passport.initialize());
     app.listen(process.env.PORT, async () => {
       console.log(
         `Server running at ${process.env.BASE_URL}:${process.env.PORT}`
