@@ -10,6 +10,9 @@ import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 import handleItemUpdate from "./workers/handleItemUpdate";
 import handleImageProcess from "./workers/handleImageProcess";
+import updateReceipt, { ScrapedItem } from "./workers/updateReceipt";
+import passport from "passport";
+import { HeaderAPIKeyStrategy } from "passport-headerapikey";
 
 dotenv.config();
 
@@ -32,9 +35,23 @@ const serverAdapter = new ExpressAdapter();
 serverAdapter.setBasePath("/admin/queues");
 
 createBullBoard({
-  queues: [new BullMQAdapter(queues.itemUpdater)],
+  queues: [
+    new BullMQAdapter(queues.itemUpdater),
+    new BullMQAdapter(queues.imageProcessors),
+  ],
   serverAdapter: serverAdapter,
 });
+
+passport.use(
+  new HeaderAPIKeyStrategy(
+    { header: "x-api-key", prefix: "api-key-" },
+    false,
+    (apiKey, done) =>
+      process.env.API_KEYS?.includes(apiKey)
+        ? done(null, true)
+        : done(null, false)
+  )
+);
 
 const app = express();
 
@@ -62,11 +79,17 @@ const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
 const addJobToImageProcessingQueue = async (job: WorkerJob, delay: number) =>
   await queues.imageProcessors.add(job.type, job, { delay });
 
+const authMiddleware = () =>
+  passport.authenticate("headerapikey", {
+    session: false,
+  });
+
 (async () => {
   try {
     app.use(express.json(), cors());
     app.post(
       "/items/update",
+      authMiddleware(),
       async (
         req: Request<{ ids: number[]; status: string; delay: number }>,
         res
@@ -90,6 +113,7 @@ const addJobToImageProcessingQueue = async (job: WorkerJob, delay: number) =>
     );
     app.post(
       "/receipts/process",
+      authMiddleware(),
       async (
         req: Request<{ receiptId: number; url: string; delay: number }>,
         res
@@ -111,7 +135,28 @@ const addJobToImageProcessingQueue = async (job: WorkerJob, delay: number) =>
         }
       }
     );
+    app.post(
+      "/receipts/callback",
+      authMiddleware(),
+      async (req: Request<{ receiptId: number; data: unknown }>, res) => {
+        try {
+          const { receiptId, data } = req.body;
+          const castedData = data as ScrapedItem[];
+          await updateReceipt({
+            receiptId,
+            data: castedData,
+          });
+          res.status(200).json({
+            success: true,
+          });
+        } catch (err) {
+          console.log(err);
+          return res.status(500).send("error in worker");
+        }
+      }
+    );
     app.use("/admin/queues", serverAdapter.getRouter());
+    app.use(passport.initialize());
     app.listen(process.env.PORT, async () => {
       console.log(
         `Server running at ${process.env.BASE_URL}:${process.env.PORT}`

@@ -1,5 +1,8 @@
 import { Job } from "bullmq";
 import { WorkerJob, jobTypes } from "../jobs";
+import prisma from "../repository/prisma";
+import { ReceiptStatus } from "@prisma/client";
+import updateReceipt, { ScrapedItem } from "./updateReceipt";
 
 const handleImageProcess = async (job: Job<WorkerJob>) => {
   switch (job.data.type) {
@@ -7,7 +10,7 @@ const handleImageProcess = async (job: Job<WorkerJob>) => {
       const { receiptId, url } = job.data.data;
       try {
         console.log(`Starting to process image: ${url}`);
-        const response = await fetch(`${process.env.IMAGE_PROCESSOR_URL}/ocr`, {
+        const result = await fetch(`${process.env.IMAGE_PROCESSOR_URL}/ocr`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -18,11 +21,25 @@ const handleImageProcess = async (job: Job<WorkerJob>) => {
             receiptId,
           }),
         });
-        if (response.ok) {
-          console.log(response.body);
+        if (!result.ok) {
+          throw new Error(`problem processing image: ${url}`);
         }
+        const { data } = await result.json();
+        const castedData = data as ScrapedItem[];
+        await updateReceipt({
+          receiptId,
+          data: castedData,
+        });
       } catch (err) {
-        console.error(`Problem initiating processing of image: ${url}`);
+        console.error(`Problem processing of image: ${url}`);
+        await prisma.receipt.update({
+          where: {
+            id: receiptId,
+          },
+          data: {
+            status: ReceiptStatus.ERROR,
+          },
+        });
         console.log(err);
       }
       return;

@@ -30,10 +30,13 @@ model Item {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime
   status          ItemStatusType @default(FRESH)
-  percentConsumed Decimal        @default(0)
+  percentConsumed Int            @default(0)
   userId          Int
   groceryTripId   Int
+  receiptId       Int?
+  importId        String         @default("")
   GroceryTrip     GroceryTrip    @relation(fields: [groceryTripId], references: [id], onDelete: Cascade)
+  Receipt         Receipt?       @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   User            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   Reminder        Reminder[]
   ItemType        ItemType[]     @relation("ItemToItemType")
@@ -106,12 +109,15 @@ model User {
 }
 
 model Receipt {
-  id            Int          @id @default(autoincrement())
+  id            Int           @id @default(autoincrement())
   url           String
-  createdAt     DateTime     @default(now())
+  createdAt     DateTime      @default(now())
   updatedAt     DateTime
   groceryTripId Int?
-  GroceryTrip   GroceryTrip? @relation(fields: [groceryTripId], references: [id], onDelete: Cascade)
+  status        ReceiptStatus @default(IMPORTED)
+  scrapedData   Json?
+  Item          Item[]
+  GroceryTrip   GroceryTrip?  @relation(fields: [groceryTripId], references: [id], onDelete: Cascade)
 }
 
 enum ItemStatusType {
@@ -119,8 +125,15 @@ enum ItemStatusType {
   OLD
   FRESH
   EATEN
+  DISCARDED
 }
 
 enum TokenType {
   RESET_PASSWORD
+}
+
+enum ReceiptStatus {
+  PROCESSING
+  IMPORTED
+  ERROR
 }
