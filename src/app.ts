@@ -13,6 +13,7 @@ import handleImageProcess from "./workers/handleImageProcess";
 import updateReceipt, { ScrapedItem } from "./workers/updateReceipt";
 import passport from "passport";
 import { HeaderAPIKeyStrategy } from "passport-headerapikey";
+import handleDailyReport from "./workers/handleDailyReport";
 
 dotenv.config();
 
@@ -29,6 +30,9 @@ const queues = {
   imageProcessors: new Queue(QUEUE_TYPES.IMAGE_PROCESSOR, {
     connection: redis.duplicate(),
   }),
+  dailyReporter: new Queue(QUEUE_TYPES.DAILY_REPORTER, {
+    connection: redis.duplicate(),
+  }),
 };
 
 const serverAdapter = new ExpressAdapter();
@@ -38,6 +42,7 @@ createBullBoard({
   queues: [
     new BullMQAdapter(queues.itemUpdater),
     new BullMQAdapter(queues.imageProcessors),
+    new BullMQAdapter(queues.dailyReporter),
   ],
   serverAdapter: serverAdapter,
 });
@@ -62,6 +67,7 @@ const workerOptions: WorkerOptions = {
 try {
   new Worker(QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
   new Worker(QUEUE_TYPES.IMAGE_PROCESSOR, handleImageProcess, workerOptions);
+  new Worker(QUEUE_TYPES.DAILY_REPORTER, handleDailyReport, workerOptions);
   console.log(
     "started worker",
     QUEUE_TYPES.ITEM_UPDATER,
@@ -78,6 +84,9 @@ const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
 
 const addJobToImageProcessingQueue = async (job: WorkerJob, delay: number) =>
   await queues.imageProcessors.add(job.type, job, { delay });
+
+const addJobToDailyReportQueue = async (job: WorkerJob, delay: number) =>
+  await queues.dailyReporter.add(job.type, job, { delay });
 
 const authMiddleware = () =>
   passport.authenticate("headerapikey", {
@@ -151,6 +160,27 @@ const authMiddleware = () =>
           });
         } catch (err) {
           console.log(err);
+          return res.status(500).send("error in worker");
+        }
+      }
+    );
+    app.post(
+      "/reports/daily",
+      authMiddleware(),
+      async (req: Request<{ userId: number; delay: number }>, res) => {
+        try {
+          const { userId: id, delay } = req.body;
+          await addJobToDailyReportQueue(
+            {
+              type: jobTypes.DAILY_REPORTER,
+              data: { id },
+            },
+            delay
+          );
+          res.status(200).json({
+            queued: true,
+          });
+        } catch (err) {
           return res.status(500).send("error in worker");
         }
       }
