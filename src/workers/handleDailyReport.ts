@@ -1,22 +1,32 @@
-import { Item, ItemStatusType, ItemType, User } from "@prisma/client";
-import { Job } from "bullmq";
-import { WorkerJob, jobTypes } from "../jobs";
+import {
+  type Item,
+  ItemStatusType,
+  type ItemType,
+  type User,
+} from "@prisma/client";
+import type { Job } from "bullmq";
+import { type WorkerJob, jobTypes } from "../jobs";
 import prisma from "../repository/prisma";
 import dayjs from "dayjs";
 import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
+import localizedFormat from "dayjs/plugin/localizedFormat";
 import mjml2html from "mjml";
 import { Resend } from "resend";
+import logger from "../utils/logger";
 
 const resend = new Resend(process.env.RESEND_KEY);
 
 dayjs.extend(isSameOrBefore);
+dayjs.extend(localizedFormat);
+
+type CombinedItem = Item & { ItemType: ItemType[] };
 
 const handleDailyReport = async (job: Job<WorkerJob>) => {
   switch (job.data.type) {
     case jobTypes.DAILY_REPORTER: {
       const { id } = job.data.data;
       try {
-        console.log(`Compiling daily report for user: ${id}`);
+        logger.info(`Compiling daily report for user: ${id}`);
         const user = await prisma.user.findUniqueOrThrow({
           where: { id },
           include: {
@@ -36,33 +46,37 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
             },
           },
         });
+
         const { itemsAtRisk, itemsToRemove, eatTheseFirst } =
           calculateItemsAtRisk(user);
-        console.log({ itemsAtRisk, itemsToRemove, eatTheseFirst });
+
+        if ([itemsToRemove, eatTheseFirst].every((list) => list.length === 0)) {
+          logger.info(`Skipping daily update for user: ${id}`);
+          return;
+        }
+
         const { data, error } = await resend.emails.send({
-          from: "Acme <onboarding@resend.dev>",
-          to: ["branford.harris@outlook.com"],
-          subject: "Hello World",
-          html: constructEmail().html,
+          from: "Broccoli Daily Updates <hello@getbroccoli.app>",
+          to: [user.email],
+          subject: `Pantry Report for ${dayjs().format("LL")}`,
+          html: constructEmail({ itemsAtRisk, itemsToRemove, eatTheseFirst })
+            .html,
         });
 
         if (error) {
-          return console.error({ error });
+          return logger.error({ error });
         }
 
-        console.log({ data });
-        console.log(`Finished compiling report for user: ${id}`);
+        logger.info(`Finished compiling report for user: ${id}`);
       } catch (err) {
-        console.error(`Problem updating item: ${err}`);
+        logger.error(`Problem updating item: ${err}`);
       }
       return;
     }
   }
 };
 
-function calculateItemsAtRisk(
-  user: User & { Item: (Item & { ItemType: ItemType[] })[] }
-) {
+function calculateItemsAtRisk(user: User & { Item: CombinedItem[] }) {
   const itemsAtRisk = user.Item.filter(
     (item) => item.status !== ItemStatusType.BAD
   );
@@ -89,72 +103,106 @@ function calculateItemsAtRisk(
   return { itemsAtRisk, itemsToRemove, eatTheseFirst };
 }
 
-function constructEmail() {
+function constructEmail({
+  itemsAtRisk,
+  itemsToRemove,
+  eatTheseFirst,
+}: {
+  itemsAtRisk: CombinedItem[];
+  itemsToRemove: CombinedItem[];
+  eatTheseFirst: CombinedItem[];
+}) {
+  const formattedEatTheseFirstBlocks = eatTheseFirst.slice(0, 6).map(
+    (item) => `
+          <mj-column>
+        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262">${
+          item.name
+        }</mj-text>
+        <mj-text>How much is left? ${
+          100 - item.percentConsumed * 100
+        }%</mj-text>
+        <mj-text color="#525252">
+         <mj-text font-style="italic" font-size="16px" font-family="Helvetica Neue" color="#626262">Storage Advice:</mj-text>
+        <mj-text color="#525252">${item.ItemType[0].storage_advice}</mj-text>
+      </mj-column>
+    `
+  );
+
+  const formattedItemsToRemoveBlocks = itemsToRemove.slice(0, 6).map(
+    (item) => `
+          <mj-column>
+        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262">${
+          item.name
+        }</mj-text>
+        <mj-text>How much is left? ${
+          100 - item.percentConsumed * 100
+        }%</mj-text>
+        <mj-text color="#525252">
+         <mj-text font-style="italic" font-size="16px" font-family="Helvetica Neue" color="#626262">Storage Advice:</mj-text>
+        <mj-text color="#525252">${item.ItemType[0].storage_advice}</mj-text>
+      </mj-column>
+    `
+  );
   return mjml2html(`
-  <mjml>
+<mjml>
   <mj-body>
-    <mj-raw>
-      <!-- Company Header -->
-    </mj-raw>
     <mj-section background-color="#f0f0f0">
       <mj-column>
-        <mj-text font-style="italic" font-size="20px" color="#626262">My Company</mj-text>
+        <mj-image src="https://getbroccoli.app/logo.png" width="200px" />
+        <mj-text font-family="Helvetica Neue" font-size="28px" color="#626262" align="center">Daily Pantry Report</mj-text>
       </mj-column>
     </mj-section>
-    <mj-raw>
-      <!-- Image Header -->
-    </mj-raw>
-    <mj-section background-url="http://1.bp.blogspot.com/-TPrfhxbYpDY/Uh3Refzk02I/AAAAAAAALw8/5sUJ0UUGYuw/s1600/New+York+in+The+1960's+-+70's+(2).jpg" background-size="cover" background-repeat="no-repeat">
-      <mj-column width="600px">
-        <mj-text align="center" color="#fff" font-size="40px" font-family="Helvetica Neue">Slogan here</mj-text>
-        <mj-button background-color="#F63A4D" href="#">Promotion</mj-button>
+    <mj-section background-url="https://images.unsplash.com/photo-1576181456177-2b99ac0aa1ef?q=80&w=700&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" background-size="cover" background-repeat="no-repeat">
+      <mj-column width="600px" padding-bottom="150px">
       </mj-column>
     </mj-section>
-    <mj-raw>
-      <!-- Intro text -->
-    </mj-raw>
     <mj-section background-color="#fafafa">
       <mj-column width="400px">
-        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262">My Awesome Text</mj-text>
-        <mj-text color="#525252">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin rutrum enim eget magna efficitur, eu semper augue semper. Aliquam erat volutpat. Cras id dui lectus. Vestibulum sed finibus lectus, sit amet suscipit nibh. Proin nec commodo purus.
-          Sed eget nulla elit. Nulla aliquet mollis faucibus.</mj-text>
-        <mj-button background-color="#F45E43" href="#">Learn more</mj-button>
+        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262" align="center">Heading to the kitchen?</mj-text>
+        <mj-text color="#525252" align="center">Eat these things first</mj-text>
+        <mj-text color="#525252" align="center" font-size="25px">⬇</mj-text>
       </mj-column>
     </mj-section>
-    <mj-raw>
-      <!-- Side image -->
-    </mj-raw>
     <mj-section background-color="white">
-      <mj-raw>
-        <!-- Left image -->
-      </mj-raw>
-      <mj-column>
-        <mj-image width="200px" src="https://designspell.files.wordpress.com/2012/01/sciolino-paris-bw.jpg"></mj-image>
-      </mj-column>
-      <mj-raw>
-        <!-- right paragraph -->
-      </mj-raw>
-      <mj-column>
-        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262">Find amazing places</mj-text>
-        <mj-text color="#525252">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin rutrum enim eget magna efficitur, eu semper augue semper. Aliquam erat volutpat. Cras id dui lectus. Vestibulum sed finibus lectus.</mj-text>
+    ${splitIntoGroupsOfThree(formattedEatTheseFirstBlocks).map((items) => {
+      return `<mj-section>${items.join(" ")}</mj-section>`;
+    })}
+      })}
+    </mj-section>
+    ${(() => {
+      if (formattedItemsToRemoveBlocks.length > 0) {
+        return `<mj-section background-color="#fafafa">
+      <mj-column width="400px">
+        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262" align="center">Better luck next time!</mj-text>
+        <mj-text color="#525252" align="center">Consider composting or removing these things</mj-text>
+        <mj-text color="#525252" align="center" font-size="25px">👋🏼</mj-text>
       </mj-column>
     </mj-section>
-    <mj-raw>
-      <!-- Icons -->
-    </mj-raw>
-    <mj-section background-color="#fbfbfb">
-      <mj-column>
-        <mj-image width="100px" src="http://191n.mj.am/img/191n/3s/x0l.png"></mj-image>
-      </mj-column>
-      <mj-column>
-        <mj-image width="100px" src="http://191n.mj.am/img/191n/3s/x01.png"></mj-image>
-      </mj-column>
-      <mj-column>
-        <mj-image width="100px" src="http://191n.mj.am/img/191n/3s/x0s.png"></mj-image>
+    <mj-section background-color="white">
+         ${splitIntoGroupsOfThree(formattedItemsToRemoveBlocks).map((items) => {
+           return `<mj-section>${items.join(" ")}</mj-section>`;
+         })}
+    </mj-section>`;
+      }
+      return "";
+    })()}
+    <mj-section background-color="#fafafa">
+      <mj-column width="400px">
+        <mj-text align="center" font-size="16px" font-family="Helvetica Neue" color="#626262" align="center">You have been doing great!</mj-text>
+        <mj-text align="center" font-size="24px" font-family="Helvetica Neue" color="#626262" align="center">Let's keep the momentum going</mj-text>
+        <mj-button background-color="#5c9841" href="getbroccoli.app/items">View your inventory</mj-button>
       </mj-column>
     </mj-section>
   </mj-body>
 </mjml>`);
+}
+
+function splitIntoGroupsOfThree<T>(arr: T[]) {
+  const result: T[][] = [];
+  for (let i = 0; i < arr.length; i += 3) {
+    result.push(arr.slice(i, i + 3));
+  }
+  return result;
 }
 
 export default handleDailyReport;

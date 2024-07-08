@@ -1,8 +1,9 @@
-import { Queue, WorkerOptions, Worker } from "bullmq";
+import { Queue, type WorkerOptions, Worker, delay } from "bullmq";
 import cors from "cors";
 import dotenv from "dotenv";
-import express, { Request } from "express";
-import { WorkerJob, jobTypes } from "./jobs";
+import express, { type Request } from "express";
+import cron from "node-cron";
+import { type WorkerJob, jobTypes } from "./jobs";
 import { QUEUE_TYPES } from "./types";
 import redis from "./redisConnection";
 import { createBullBoard } from "@bull-board/api";
@@ -10,16 +11,17 @@ import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 import handleItemUpdate from "./workers/handleItemUpdate";
 import handleImageProcess from "./workers/handleImageProcess";
-import updateReceipt, { ScrapedItem } from "./workers/updateReceipt";
+import updateReceipt, { type ScrapedItem } from "./workers/updateReceipt";
 import passport from "passport";
 import { HeaderAPIKeyStrategy } from "passport-headerapikey";
 import handleDailyReport from "./workers/handleDailyReport";
-
+import prisma from "./repository/prisma";
+import logger from "./utils/logger";
 dotenv.config();
 
 export const redisOptions = {
   host: process.env.REDISHOST ?? "localhost",
-  port: parseInt(process.env.REDISPORT ?? "6379"),
+  port: Number.parseInt(process.env.REDISPORT ?? "6379"),
   password: process.env.REDISPASSWORD,
 };
 
@@ -68,13 +70,13 @@ try {
   new Worker(QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
   new Worker(QUEUE_TYPES.IMAGE_PROCESSOR, handleImageProcess, workerOptions);
   new Worker(QUEUE_TYPES.DAILY_REPORTER, handleDailyReport, workerOptions);
-  console.log(
+  logger.info(
     "started worker",
     QUEUE_TYPES.ITEM_UPDATER,
     QUEUE_TYPES.IMAGE_PROCESSOR
   );
 } catch (err) {
-  console.error(err);
+  logger.error(err);
 }
 
 // Utilities
@@ -159,7 +161,7 @@ const authMiddleware = () =>
             success: true,
           });
         } catch (err) {
-          console.log(err);
+          logger.error(err);
           return res.status(500).send("error in worker");
         }
       }
@@ -188,14 +190,34 @@ const authMiddleware = () =>
     app.use("/admin/queues", serverAdapter.getRouter());
     app.use(passport.initialize());
     app.listen(process.env.PORT, async () => {
-      console.log(
+      logger.info(
         `Server running at ${process.env.BASE_URL}:${process.env.PORT}`
       );
-      console.log(
+      logger.info(
         `For the UI, open ${process.env.BASE_URL}:${process.env.PORT}/admin/queues`
       );
     });
+    cron.schedule(
+      "30 10 * * *",
+      async () => {
+        logger.info("Starting daily reports queue");
+        const users = await prisma.user.findMany();
+        users.map((user, index) => {
+          addJobToDailyReportQueue(
+            {
+              type: jobTypes.DAILY_REPORTER,
+              data: { id: user.id },
+            },
+            index * 5000
+          );
+        });
+      },
+      {
+        scheduled: true,
+        timezone: "America/Chicago",
+      }
+    );
   } catch (e) {
-    console.error("error on startup:", e);
+    logger.error("error on startup:", e);
   }
 })();
