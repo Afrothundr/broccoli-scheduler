@@ -1,6 +1,7 @@
 import { ReceiptStatus } from "@prisma/client";
 import prisma from "../repository/prisma";
 import { randomUUID } from "crypto";
+import logger from "../utils/logger";
 
 export type ScrapedItem = {
   name?: string;
@@ -33,7 +34,7 @@ const updateReceipt = async ({
       },
     });
   } catch (err) {
-    console.error(`Problem updating receipt: ${err}`);
+    logger.error(`Problem updating receipt: ${err}`);
     await prisma.receipt.update({
       where: {
         id: receiptId,

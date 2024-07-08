@@ -1,6 +1,7 @@
 export enum jobTypes {
   ITEM_UPDATER = "Update Item Freshness",
   IMAGE_PROCESSOR = "Processes Image",
+  DAILY_REPORTER = "Send Daily Report Email",
 }
 
 export interface ItemUpdateJob {
@@ -13,4 +14,9 @@ export interface ImageProcessJob {
   data: { receiptId: number; url: string };
 }
 
-export type WorkerJob = ItemUpdateJob | ImageProcessJob;
+export interface DailyReporterJob {
+  type: jobTypes.DAILY_REPORTER;
+  data: { id: number };
+}
+
+export type WorkerJob = ItemUpdateJob | ImageProcessJob | DailyReporterJob;

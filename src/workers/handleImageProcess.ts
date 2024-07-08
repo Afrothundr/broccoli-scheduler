@@ -1,8 +1,9 @@
-import { Job } from "bullmq";
-import { WorkerJob, jobTypes } from "../jobs";
+import type { Job } from "bullmq";
+import { type WorkerJob, jobTypes } from "../jobs";
 import prisma from "../repository/prisma";
 import { ReceiptStatus } from "@prisma/client";
-import updateReceipt, { ScrapedItem } from "./updateReceipt";
+import updateReceipt, { type ScrapedItem } from "./updateReceipt";
+import logger from "../utils/logger";
 
 const handleImageProcess = async (job: Job<WorkerJob>) => {
   switch (job.data.type) {
@@ -31,7 +32,7 @@ const handleImageProcess = async (job: Job<WorkerJob>) => {
           data: castedData,
         });
       } catch (err) {
-        console.error(`Problem processing of image: ${url}`);
+        logger.error(`Problem processing of image: ${url}`);
         await prisma.receipt.update({
           where: {
             id: receiptId,

@@ -1,15 +1,16 @@
 import Redis from "ioredis";
 import dotenv from "dotenv";
+import logger from "./utils/logger";
 dotenv.config();
 
 export const redisConfig = {
   host: process.env.REDISHOST ?? "localhost",
-  port: parseInt(process.env.REDISPORT ?? "6379"),
+  port: Number.parseInt(process.env.REDISPORT ?? "6379"),
   password: process.env.REDISPASSWORD,
 };
 
 // getting redis connection
-console.log("Redis Config", redisConfig.host, redisConfig.port);
+logger.info("Redis Config", redisConfig.host, redisConfig.port);
 
 const clientConnection = new Redis({
   ...redisConfig,
@@ -18,15 +19,15 @@ const clientConnection = new Redis({
 });
 
 clientConnection.on("connect", () => {
-  console.log(`Connected to redis`);
+  logger.info("Connected to redis");
 });
 
 clientConnection.on("error", (err) => {
-  console.log(`Error in Redis connection ${err}`);
+  logger.info(`Error in Redis connection ${err}`);
 });
 
 clientConnection.on("end", () => {
-  console.log("Client disconnected from redis");
+  logger.info("Client disconnected from redis");
 });
 
 export default clientConnection;
