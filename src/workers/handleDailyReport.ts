@@ -118,9 +118,7 @@ function constructEmail({
         <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262">${
           item.name
         }</mj-text>
-        <mj-text>How much is left? ${
-          100 - item.percentConsumed * 100
-        }%</mj-text>
+        <mj-text>How much is left? ${100 - item.percentConsumed}%</mj-text>
         <mj-text color="#525252">
          <mj-text font-style="italic" font-size="16px" font-family="Helvetica Neue" color="#626262">Storage Advice:</mj-text>
         <mj-text color="#525252">${item.ItemType[0].storage_advice}</mj-text>
@@ -134,9 +132,7 @@ function constructEmail({
         <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262">${
           item.name
         }</mj-text>
-        <mj-text>How much is left? ${
-          100 - item.percentConsumed * 100
-        }%</mj-text>
+        <mj-text>How much is left? ${100 - item.percentConsumed}%</mj-text>
         <mj-text color="#525252">
          <mj-text font-style="italic" font-size="16px" font-family="Helvetica Neue" color="#626262">Storage Advice:</mj-text>
         <mj-text color="#525252">${item.ItemType[0].storage_advice}</mj-text>
