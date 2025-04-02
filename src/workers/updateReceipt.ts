@@ -1,6 +1,6 @@
 import { ReceiptStatus } from "@prisma/client";
 import prisma from "../repository/prisma";
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import logger from "../utils/logger";
 
 export type ScrapedItem = {
@@ -8,10 +8,7 @@ export type ScrapedItem = {
   price?: number;
   quantity?: number;
   unit?: string;
-  itemTypes?: {
-    id: number;
-    name: string;
-  }[];
+  category?: string;
 };
 
 const updateReceipt = async ({
