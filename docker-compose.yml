@@ -1,4 +1,3 @@
-version: "1"
 services:
   broccoli-scheduler:
     container_name: broccoli-scheduler
