@@ -10,7 +10,7 @@ const handleImageProcess = async (job: Job<WorkerJob>) => {
     case jobTypes.IMAGE_PROCESSOR: {
       const { receiptId, url } = job.data.data;
       try {
-        console.log(`Starting to process image: ${url}`);
+        logger.info(`Starting to process image: ${url}`);
         const result = await fetch(`${process.env.IMAGE_PROCESSOR_URL}/ocr`, {
           method: "POST",
           headers: {
@@ -23,7 +23,8 @@ const handleImageProcess = async (job: Job<WorkerJob>) => {
           }),
         });
         if (!result.ok) {
-          throw new Error(`problem processing image: ${url}`);
+          const text = await result.text();
+          throw new Error(text);
         }
         const { data } = await result.json();
         const castedData = data as ScrapedItem[];
@@ -33,6 +34,7 @@ const handleImageProcess = async (job: Job<WorkerJob>) => {
         });
       } catch (err) {
         logger.error(`Problem processing of image: ${url}`);
+        logger.error(err);
         await prisma.receipt.update({
           where: {
             id: receiptId,
@@ -41,7 +43,6 @@ const handleImageProcess = async (job: Job<WorkerJob>) => {
             status: ReceiptStatus.ERROR,
           },
         });
-        console.log(err);
       }
       return;
     }
