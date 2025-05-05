@@ -13,6 +13,9 @@ import localizedFormat from "dayjs/plugin/localizedFormat";
 import mjml2html from "mjml";
 import { Resend } from "resend";
 import logger from "../utils/logger";
+import calculateUsageRate from "../utils/usageRate";
+import calculateTotalSavings from "../utils/totalSavings";
+import type { RecipeInformation, RecipeResponse } from "../types";
 
 const resend = new Resend(process.env.RESEND_KEY);
 
@@ -42,10 +45,30 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
                     ItemStatusType.BAD,
                   ],
                 },
+                ItemType: {
+                  none: {
+                    name: {
+                      in: ["Frozen food", "Non-perishable"],
+                    },
+                  },
+                },
               },
             },
           },
         });
+        const groceryTrips = await prisma.user.findUniqueOrThrow({
+          where: { id },
+          include: {
+            GroceryTrip: {
+              include: {
+                Item: true,
+              },
+            },
+          },
+        });
+
+        const usageRate = calculateUsageRate(groceryTrips.GroceryTrip);
+        const totalSavings = calculateTotalSavings(groceryTrips.GroceryTrip);
 
         const { itemsAtRisk, itemsToRemove, eatTheseFirst } =
           calculateItemsAtRisk(user);
@@ -54,13 +77,43 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
           logger.info(`Skipping daily update for user: ${id}`);
           return;
         }
+        const response = eatTheseFirst.length
+          ? await fetch(
+              `https://api.spoonacular.com/recipes/findByIngredients?ingredients=${encodeURI(
+                [...eatTheseFirst.slice(0, 3), ...itemsToRemove.slice(0, 3)]
+                  .map((item) => item.ItemType[0].name)
+                  .join(", ")
+              )}&number=1&apiKey=${process.env.SPOONTACULAR_KEY}`
+            )
+          : null;
 
+        const recipes = response?.ok
+          ? ((await response?.json()) as RecipeResponse[])
+          : null;
+
+        const recipe = recipes?.[0];
+        const recipeFullResponse = await fetch(
+          `https://api.spoonacular.com/recipes/${recipe?.id}/information&apiKey=${process.env.SPOONTACULAR_KEY}`
+        );
+        logger.info(
+          `https://api.spoonacular.com/recipes/${recipe?.id}/information&apiKey=${process.env.SPOONTACULAR_KEY}`
+        );
+        const recipeFull = recipeFullResponse.ok
+          ? ((await recipeFullResponse?.json()) as RecipeInformation)
+          : null;
         const { data, error } = await resend.emails.send({
           from: "Broccoli Daily Updates <hello@getbroccoli.app>",
           to: [user.email],
           subject: `Pantry Report for ${dayjs().format("LL")}`,
-          html: constructEmail({ itemsAtRisk, itemsToRemove, eatTheseFirst })
-            .html,
+          html: constructEmail({
+            itemsAtRisk,
+            itemsToRemove,
+            eatTheseFirst,
+            usageRate,
+            totalSavings,
+            recipe,
+            recipeFull,
+          }).html,
         });
 
         if (error) {
@@ -107,90 +160,262 @@ function constructEmail({
   itemsAtRisk,
   itemsToRemove,
   eatTheseFirst,
+  usageRate = 0,
+  totalSavings = 0,
+  recipe,
+  recipeFull,
 }: {
   itemsAtRisk: CombinedItem[];
   itemsToRemove: CombinedItem[];
   eatTheseFirst: CombinedItem[];
+  usageRate: number | null;
+  totalSavings: number | null;
+  recipe?: RecipeResponse | null;
+  recipeFull?: RecipeInformation | null;
 }) {
-  const formattedEatTheseFirstBlocks = eatTheseFirst.slice(0, 6).map(
+  const formattedEatTheseFirstBlocks = eatTheseFirst.slice(0, 3).map(
     (item) => `
-          <mj-column>
-        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262">${
-          item.name
-        }</mj-text>
-        <mj-text>How much is left? ${100 - item.percentConsumed}%</mj-text>
-        <mj-text color="#525252">
-         <mj-text font-style="italic" font-size="16px" font-family="Helvetica Neue" color="#626262">Storage Advice:</mj-text>
-        <mj-text color="#525252">${item.ItemType[0].storage_advice}</mj-text>
+       <mj-column padding="5px">
+        <mj-wrapper css-class="product-card" padding="0" background-color="#f5f5f5">
+          <mj-section padding="0">
+            <mj-column>
+              <mj-image src="https://placehold.co/300x180/8BC34A/FFFFFF?text=${encodeURI(
+                item.ItemType[0].name
+              )}" padding="0" />
+            </mj-column>
+          </mj-section>
+          <mj-section padding="15px">
+            <mj-column>
+              <mj-text font-weight="700" font-size="18px" padding="0 0 10px">
+              ${item.name}
+              </mj-text>
+              <mj-text padding="0 0 5px">
+                <strong>How much is left?</strong><br />
+                <span class="expiry-ok">${100 - item.percentConsumed}%</span>
+              </mj-text>
+              <mj-text padding="0">
+                <strong>Storage Advice:</strong><br />
+                ${item.ItemType[0].storage_advice}
+              </mj-text>
+            </mj-column>
+          </mj-section>
+        </mj-wrapper>
       </mj-column>
     `
   );
 
-  const formattedItemsToRemoveBlocks = itemsToRemove.slice(0, 6).map(
+  const formattedItemsToRemoveBlocks = itemsToRemove.slice(0, 3).map(
     (item) => `
-          <mj-column>
-        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262">${
-          item.name
-        }</mj-text>
-        <mj-text>How much is left? ${100 - item.percentConsumed}%</mj-text>
-        <mj-text color="#525252">
-         <mj-text font-style="italic" font-size="16px" font-family="Helvetica Neue" color="#626262">Storage Advice:</mj-text>
-        <mj-text color="#525252">${item.ItemType[0].storage_advice}</mj-text>
+       <mj-column padding="5px">
+        <mj-wrapper css-class="product-card" padding="0" background-color="#f5f5f5">
+          <mj-section padding="0">
+            <mj-column>
+              <mj-image src="https://placehold.co/300x180/c3824a/FFFFFF?text=${encodeURI(
+                item.ItemType[0].name
+              )}" padding="0" />
+            </mj-column>
+          </mj-section>
+          <mj-section padding="15px">
+            <mj-column>
+              <mj-text font-weight="700" font-size="18px" padding="0 0 10px">
+              ${item.name}
+              </mj-text>
+              <mj-text padding="0 0 5px">
+                <strong>How much is left?</strong><br />
+                <span class="expiry-ok">${100 - item.percentConsumed}%</span>
+              </mj-text>
+              <mj-text padding="0">
+                <strong>Storage Advice:</strong><br />
+                ${item.ItemType[0].storage_advice}
+              </mj-text>
+            </mj-column>
+          </mj-section>
+        </mj-wrapper>
       </mj-column>
     `
   );
   return mjml2html(`
 <mjml>
-  <mj-body>
-    <mj-section background-color="#f0f0f0">
-      <mj-column>
-        <mj-image src="https://getbroccoli.app/logo.png" width="200px" />
-        <mj-text font-family="Helvetica Neue" font-size="28px" color="#626262" align="center">Daily Pantry Report</mj-text>
-      </mj-column>
-    </mj-section>
-    <mj-section background-url="https://images.unsplash.com/photo-1576181456177-2b99ac0aa1ef?q=80&w=700&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" background-size="cover" background-repeat="no-repeat">
-      <mj-column width="600px" padding-bottom="150px">
-      </mj-column>
-    </mj-section>
-    <mj-section background-color="#fafafa">
-      <mj-column width="400px">
-        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262" align="center">Heading to the kitchen?</mj-text>
-        <mj-text color="#525252" align="center">Eat these things first</mj-text>
-        <mj-text color="#525252" align="center" font-size="25px">⬇</mj-text>
-      </mj-column>
-    </mj-section>
-    <mj-section background-color="white">
-    ${splitIntoGroupsOfThree(formattedEatTheseFirstBlocks).map((items) => {
-      return `<mj-section>${items.join(" ")}</mj-section>`;
-    })}
-      })}
-    </mj-section>
-    ${(() => {
-      if (formattedItemsToRemoveBlocks.length > 0) {
-        return `<mj-section background-color="#fafafa">
-      <mj-column width="400px">
-        <mj-text font-style="italic" font-size="20px" font-family="Helvetica Neue" color="#626262" align="center">Better luck next time!</mj-text>
-        <mj-text color="#525252" align="center">Consider composting or removing these things</mj-text>
-        <mj-text color="#525252" align="center" font-size="25px">👋🏼</mj-text>
-      </mj-column>
-    </mj-section>
-    <mj-section background-color="white">
-         ${splitIntoGroupsOfThree(formattedItemsToRemoveBlocks).map((items) => {
-           return `<mj-section>${items.join(" ")}</mj-section>`;
-         })}
-    </mj-section>`;
+  <mj-head>
+    <mj-title>Broccoli Daily Pantry Report</mj-title>
+    <mj-font name="Roboto" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700" />
+    <mj-attributes>
+      <mj-all font-family="Roboto, Arial, sans-serif" />
+      <mj-text font-weight="400" font-size="16px" color="#333333" line-height="24px" />
+      <mj-section padding="10px 0" />
+    </mj-attributes>
+    <mj-style>
+      .product-card {
+        border-radius: 8px;
+        overflow: hidden;
       }
-      return "";
-    })()}
-    <mj-section background-color="#fafafa">
-      <mj-column width="400px">
-        <mj-text align="center" font-size="16px" font-family="Helvetica Neue" color="#626262" align="center">You have been doing great!</mj-text>
-        <mj-text align="center" font-size="24px" font-family="Helvetica Neue" color="#626262" align="center">Let's keep the momentum going</mj-text>
-        <mj-button background-color="#5c9841" href="getbroccoli.app/items">View your inventory</mj-button>
+      .expiry-warning {
+        color: #e74c3c;
+        font-weight: bold;
+      }
+      .expiry-ok {
+        color: #27ae60;
+        font-weight: bold;
+      }
+      .heading-text {
+        color: #666;
+        font-size: 28px;
+      }
+      .product-title {
+        font-weight: 500;
+      }
+    </mj-style>
+  </mj-head>
+
+  <mj-body background-color="#f9f9f9">
+    <!-- Header -->
+    <mj-section background-color="#ffffff" padding="20px 0">
+      <mj-column>
+        <mj-image src="https://getbroccoli.app/logo.png" alt="Broccoli Logo" width="200px" padding="10px 0" />
+        <mj-text align="center" color="#666666" font-size="32px" font-weight="300" padding="10px 0">
+          Daily Pantry Report
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- Hero Image -->
+        <mj-hero
+      mode="fluid-height"
+      background-width="600px"
+      background-height="200px"
+      background-url=
+          "https://images.unsplash.com/photo-1576181456177-2b99ac0aa1ef?q=80"
+      background-color="#2a3448"
+      padding="100px 0px">
+    </mj-hero>
+  
+    <!-- Main Heading -->
+     ${
+       splitIntoGroupsOfThree(formattedEatTheseFirstBlocks).length
+         ? ` <mj-section background-color="#ffffff" padding="30px 0 10px">
+      <mj-column>
+        <mj-text align="center" css-class="heading-text" font-size="28px" padding="0 20px">
+          Heading to the kitchen?
+        </mj-text>
+        <mj-text align="center" font-size="20px" padding="10px 20px 20px">
+          Eat these things first
+        </mj-text>
+        <mj-image src="https://placehold.co/50x50/95A5A6/FFFFFF?text=↓" width="50px" padding="0 0 20px" />
+      </mj-column>
+    </mj-section>
+
+    <!-- Products Grid -->
+    <mj-section background-color="#ffffff">
+          ${splitIntoGroupsOfThree(formattedEatTheseFirstBlocks).map(
+            (items) => {
+              return `<mj-section padding="20px 0">${items.join(
+                " "
+              )}</mj-section>`;
+            }
+          )}
+    </mj-section>`
+         : ""
+     }
+
+          ${
+            splitIntoGroupsOfThree(formattedItemsToRemoveBlocks).length
+              ? ` <mj-section background-color="#ffffff" padding="30px 0 10px">
+      <mj-column>
+        <mj-text align="center" css-class="heading-text" font-size="28px" padding="0 20px">
+          Might be that time...
+        </mj-text>
+        <mj-text align="center" font-size="20px" padding="10px 20px 20px">
+          See if you can save these items
+        </mj-text>
+        <mj-image src="https://placehold.co/50x50/95A5A6/FFFFFF?text=↓" width="50px" padding="0 0 20px" />
+      </mj-column>
+    </mj-section>
+
+    <!-- Products Grid -->
+    <mj-section background-color="#ffffff">
+          ${splitIntoGroupsOfThree(formattedItemsToRemoveBlocks).map(
+            (items) => {
+              return `<mj-section padding="20px 0">${items.join(
+                " "
+              )}</mj-section>`;
+            }
+          )}
+    </mj-section>`
+              : ""
+          }
+   
+     <mj-section>
+      <mj-column>
+           <mj-button background-color="#5c9841" href="getbroccoli.app/items">View your inventory</mj-button>
+      </mj-column>
+    </mj-section>
+
+    <!-- Usage Tips -->
+    ${
+      recipe
+        ? `    <mj-section background-color="#8BC34A" padding="20px 0">
+      <mj-column>
+        <mj-text color="#ffffff" font-size="20px" align="center" font-weight="500">
+          This Week's Recipe Idea
+        </mj-text>
+        <mj-text color="#ffffff" align="center">
+          Use your ${recipe.usedIngredients
+            .map((ingredient) => ingredient.name)
+            .join(", ")
+            .replace(/, ([^,]*)$/, " and $1")} to create a delicious ${
+            recipe.title
+          }!
+        </mj-text>
+        ${
+          recipeFull
+            ? `<mj-button background-color="#ffffff" color="#8BC34A" font-weight="500" border-radius="4px" href="${recipeFull.sourceUrl}">
+          VIEW RECIPE
+        </mj-button>`
+            : ""
+        }
+      </mj-column>
+    </mj-section>`
+        : ""
+    }
+
+
+    <!-- Food Waste Stats -->
+    <mj-section background-color="#ffffff" padding="30px 0">
+      <mj-column width="100%">
+        <mj-text align="center" font-size="20px" font-weight="500" padding="0 20px 15px">
+          Your Pantry Stats
+        </mj-text>
+      </mj-column>
+      <mj-column width="50%" padding-bottom="10px" >
+        <mj-text align="center" font-size="36px" font-weight="700" color="#8BC34A" padding="0">
+          ${usageRate}%
+        </mj-text>
+        <mj-text align="center" padding="5px 0 0">
+          Usage Rate
+        </mj-text>
+      </mj-column>
+      <mj-column width="50%" padding-bottom="10px">
+        <mj-text align="center" font-size="36px" font-weight="700" color="#8BC34A" padding="0">
+         $${totalSavings}
+        </mj-text>
+        <mj-text align="center" padding="5px 0 0">
+          Total Savings
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- Footer -->
+    <mj-section background-color="#f5f5f5" padding="20px 0">
+      <mj-column>
+        <mj-text align="center" color="#666666" font-size="12px" line-height="18px">
+          © 2025 Broccoli. All rights reserved.<br />
+          You're receiving this email because you signed up for pantry tracking.
+        </mj-text>
       </mj-column>
     </mj-section>
   </mj-body>
-</mjml>`);
+</mjml>
+`);
 }
 
 function splitIntoGroupsOfThree<T>(arr: T[]) {
