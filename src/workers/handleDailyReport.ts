@@ -15,14 +15,18 @@ import { Resend } from "resend";
 import logger from "../utils/logger";
 import calculateUsageRate from "../utils/usageRate";
 import calculateTotalSavings from "../utils/totalSavings";
-import type { RecipeInformation, RecipeResponse } from "../types";
+import type {
+  RecipeInformation,
+  RecipeResponse,
+  UserPreferences,
+} from "../types";
 
 const resend = new Resend(process.env.RESEND_KEY);
 
 dayjs.extend(isSameOrBefore);
 dayjs.extend(localizedFormat);
 
-type CombinedItem = Item & { ItemType: ItemType[] };
+type CombinedItem = Item & { itemTypes: ItemType[] };
 
 const handleDailyReport = async (job: Job<WorkerJob>) => {
   switch (job.data.type) {
@@ -30,12 +34,13 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
       const { id } = job.data.data;
       try {
         logger.info(`Compiling daily report for user: ${id}`);
+
         const user = await prisma.user.findUniqueOrThrow({
           where: { id },
           include: {
-            Item: {
+            items: {
               include: {
-                ItemType: true,
+                itemTypes: true,
               },
               where: {
                 status: {
@@ -45,7 +50,7 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
                     ItemStatusType.BAD,
                   ],
                 },
-                ItemType: {
+                itemTypes: {
                   none: {
                     name: {
                       in: ["Frozen food", "Non-perishable"],
@@ -59,16 +64,18 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
         const groceryTrips = await prisma.user.findUniqueOrThrow({
           where: { id },
           include: {
-            GroceryTrip: {
+            groceryTrips: {
               include: {
-                Item: true,
+                items: true,
               },
             },
           },
         });
+        const preferences = user.preferences ?? ({} as UserPreferences);
+        logger.info(`User preferences: ${JSON.stringify(preferences)}`);
 
-        const usageRate = calculateUsageRate(groceryTrips.GroceryTrip);
-        const totalSavings = calculateTotalSavings(groceryTrips.GroceryTrip);
+        const usageRate = calculateUsageRate(groceryTrips.groceryTrips);
+        const totalSavings = calculateTotalSavings(groceryTrips.groceryTrips);
 
         const { itemsAtRisk, itemsToRemove, eatTheseFirst } =
           calculateItemsAtRisk(user);
@@ -77,11 +84,15 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
           logger.info(`Skipping daily update for user: ${id}`);
           return;
         }
+        if (process.env.NODE_ENV === "local") {
+          logger.info(`Skipping daily update for user: ${id}`);
+          return;
+        }
         const response = eatTheseFirst.length
           ? await fetch(
               `https://api.spoonacular.com/recipes/findByIngredients?ingredients=${encodeURI(
                 [...eatTheseFirst.slice(0, 3), ...itemsToRemove.slice(0, 3)]
-                  .map((item) => item.ItemType[0].name)
+                  .map((item) => item.itemTypes[0].name)
                   .join(", ")
               )}&number=1&apiKey=${process.env.SPOONTACULAR_KEY}`
             )
@@ -129,16 +140,16 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
   }
 };
 
-function calculateItemsAtRisk(user: User & { Item: CombinedItem[] }) {
-  const itemsAtRisk = user.Item.filter(
+function calculateItemsAtRisk(user: User & { items: CombinedItem[] }) {
+  const itemsAtRisk = user.items.filter(
     (item) => item.status !== ItemStatusType.BAD
   );
-  const itemsToRemove = user.Item.filter(
+  const itemsToRemove = user.items.filter(
     (item) => item.status === ItemStatusType.BAD
   );
   const eatTheseFirst = itemsAtRisk.sort((a, b) => {
-    const itemTypeA = a.ItemType[0];
-    const itemTypeB = b.ItemType[0];
+    const itemTypeA = a.itemTypes[0];
+    const itemTypeB = b.itemTypes[0];
     const expirationDateA = dayjs(itemTypeA.createdAt).add(
       itemTypeA.suggested_life_span_seconds,
       "seconds"
@@ -180,7 +191,7 @@ function constructEmail({
           <mj-section padding="0">
             <mj-column>
               <mj-image src="https://placehold.co/300x180/8BC34A/FFFFFF?text=${encodeURI(
-                item.ItemType[0].name
+                item.itemTypes[0].name
               )}" padding="0" />
             </mj-column>
           </mj-section>
@@ -195,7 +206,7 @@ function constructEmail({
               </mj-text>
               <mj-text padding="0">
                 <strong>Storage Advice:</strong><br />
-                ${item.ItemType[0].storage_advice}
+                ${item.itemTypes[0].storage_advice}
               </mj-text>
             </mj-column>
           </mj-section>
@@ -211,7 +222,7 @@ function constructEmail({
           <mj-section padding="0">
             <mj-column>
               <mj-image src="https://placehold.co/300x180/c3824a/FFFFFF?text=${encodeURI(
-                item.ItemType[0].name
+                item.itemTypes[0].name
               )}" padding="0" />
             </mj-column>
           </mj-section>
@@ -226,7 +237,7 @@ function constructEmail({
               </mj-text>
               <mj-text padding="0">
                 <strong>Storage Advice:</strong><br />
-                ${item.ItemType[0].storage_advice}
+                ${item.itemTypes[0].storage_advice}
               </mj-text>
             </mj-column>
           </mj-section>

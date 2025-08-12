@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import express, { type Request } from "express";
 import cron from "node-cron";
 import { type WorkerJob, jobTypes } from "./jobs";
-import { QUEUE_TYPES } from "./types";
+import { QUEUE_TYPES, UserPreferences } from "./types";
 import redis from "./redisConnection";
 import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
@@ -17,6 +17,7 @@ import { HeaderAPIKeyStrategy } from "passport-headerapikey";
 import handleDailyReport from "./workers/handleDailyReport";
 import prisma from "./repository/prisma";
 import logger from "./utils/logger";
+import dayjs from "dayjs";
 dotenv.config();
 
 export const redisOptions = {
@@ -107,6 +108,11 @@ const authMiddleware = () =>
       ) => {
         try {
           const { ids, status, delay } = req.body;
+          logger.info(
+            `adding job to item updater queue: ${ids} - ${dayjs()
+              .add(delay, "millisecond")
+              .format("MM-DD-YYYY HH:mm:ss")}`
+          );
           await addJobToItemUpdaterQueue(
             {
               type: jobTypes.ITEM_UPDATER,
@@ -203,13 +209,30 @@ const authMiddleware = () =>
         logger.info("Starting daily reports queue");
         const users = await prisma.user.findMany();
         users.map((user, index) => {
-          addJobToDailyReportQueue(
-            {
-              type: jobTypes.DAILY_REPORTER,
-              data: { id: user.id },
-            },
-            index * 5000
-          );
+          const preferences = (user.preferences ??
+            {}) as unknown as UserPreferences;
+          if (!preferences?.notifications) {
+            return;
+          }
+          switch (preferences?.emailFrequency) {
+            case "weekly":
+              if (dayjs().day() !== 0) {
+                break;
+              }
+            case "monthly":
+              if (dayjs().date() !== 1) {
+                break;
+              }
+            case "daily":
+            default:
+              addJobToDailyReportQueue(
+                {
+                  type: jobTypes.DAILY_REPORTER,
+                  data: { id: user.id },
+                },
+                index * 5000
+              );
+          }
         });
       },
       {

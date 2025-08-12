@@ -3,17 +3,17 @@ import logger from "./logger";
 
 export default function calculateTotalSavings(
   groceryTrips: (GroceryTrip & {
-    Item: (Item & { status: ItemStatusType })[];
+    items: (Item & { status: ItemStatusType })[];
   })[]
 ) {
   try {
     const filteredTrips = groceryTrips.reduce(
       (acc, curr) => {
-        if (curr.Item.length > 0) {
+        if (curr.items.length > 0) {
           acc.push({
-            totalItems: curr.Item.length,
-            cost: curr.Item.reduce((acc, curr) => acc + curr.price, 0),
-            itemsConsumed: curr.Item.reduce(
+            totalItems: curr.items.length,
+            cost: curr.items.reduce((acc, curr) => acc + curr.price, 0),
+            itemsConsumed: curr.items.reduce(
               (total, item) =>
                 item.status === ItemStatusType.EATEN
                   ? total + 1
