@@ -67,3 +67,8 @@ export type RecipeInformation = {
   weightWatcherSmartPoints: number;
   dishTypes: Array<string>;
 };
+
+export type UserPreferences = {
+  notifications?: boolean;
+  emailFrequency?: "daily" | "weekly" | "monthly";
+};

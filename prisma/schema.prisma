@@ -7,17 +7,114 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+model User {
+  id            String    @id
+  createdAt     DateTime
+  updatedAt     DateTime? @updatedAt
+  name          String
+  email         String    @unique
+  emailVerified Boolean
+  image         String?
+  bio           String?
 
-model GroceryTrip {
-  id          Int       @id @default(autoincrement())
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime
-  name        String
-  description String    @default("")
-  userId      Int
-  User        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  Item        Item[]
-  Receipt     Receipt[]
+  // images → direct URL uploads
+  avatarImageUrl String?
+  coverImageUrl  String?
+
+  // images → UploadThing keys
+  avatarImageUTKey String?
+  coverImageUTKey  String?
+
+  // images → DB relations
+  avatarImageId  String?   @unique
+  avatarImage    UTImage?  @relation("AvatarImage", fields: [avatarImageId], references: [id], onDelete: SetNull)
+  coverImageId   String?   @unique
+  coverImage     UTImage?  @relation("CoverImage", fields: [coverImageId], references: [id], onDelete: SetNull)
+  uploadedImages UTImage[] @relation("UploadedImages") // Relation for all uploaded images by user
+
+  timezone String? @default("Etc/GMT")
+
+  preferences Json? @default("{}")
+
+  sessions Session[]
+  accounts Account[]
+  groceryTrips   GroceryTrip[]
+  items          Item[]
+  reminders      Reminder[]
+
+  // better-auth-admin
+  role       String    @default("user")
+  banReason  String?
+  banExpires DateTime?
+  banned     Boolean   @default(false)
+
+  // better-auth-username
+  username        String?
+  displayUsername String?
+
+  onboarded Boolean @default(false)
+
+  @@unique([username])
+  @@map("users")
+}
+
+model Session {
+  id             String    @id
+  expiresAt      DateTime
+  token          String    @unique
+  createdAt      DateTime
+  updatedAt      DateTime? @updatedAt
+  ipAddress      String?
+  userAgent      String?
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  impersonatedBy String?
+
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id])
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime
+  updatedAt             DateTime? @updatedAt
+
+  @@map("accounts")
+}
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime?
+  updatedAt  DateTime? @updatedAt
+
+  @@map("verifications")
+}
+
+model UTImage {
+  id        String   @id @default(cuid())
+  key       String   @unique // The key returned by UploadThing
+  userId    String
+  user      User     @relation("UploadedImages", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  usedAsAvatarByUser User? @relation("AvatarImage")
+  usedAsCoverByUser  User? @relation("CoverImage")
+
+  @@index([userId])
+  @@map("ut_images")
 }
 
 model Item {
@@ -26,98 +123,70 @@ model Item {
   description     String         @default("")
   price           Float
   quantity        Int
+  importId        String         @default("")
   unit            String         @default("")
   createdAt       DateTime       @default(now())
-  updatedAt       DateTime
+  updatedAt       DateTime       @updatedAt
   status          ItemStatusType @default(FRESH)
   percentConsumed Int            @default(0)
-  userId          Int
+  userId          String
   groceryTripId   Int
+  groceryTrip     GroceryTrip    @relation(fields: [groceryTripId], references: [id], onDelete: Cascade)
   receiptId       Int?
-  importId        String         @default("")
-  GroceryTrip     GroceryTrip    @relation(fields: [groceryTripId], references: [id], onDelete: Cascade)
-  Receipt         Receipt?       @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  User            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  Reminder        Reminder[]
-  ItemType        ItemType[]     @relation("ItemToItemType")
+  receipt         Receipt?       @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminders       Reminder[]
+  itemTypes       ItemType[]
 }
 
 model ItemType {
   id                          Int      @id @default(autoincrement())
   createdAt                   DateTime @default(now())
-  updatedAt                   DateTime
+  updatedAt                   DateTime @updatedAt
   name                        String   @unique
   category                    String
   storage_advice              String
   suggested_life_span_seconds Int
-  Item                        Item[]   @relation("ItemToItemType")
+  items                       Item[]
 }
 
-model Reminder {
-  id        Int      @id @default(autoincrement())
-  createdAt DateTime @default(now())
-  updatedAt DateTime
-  time      DateTime
-  itemId    Int
-  userId    Int
-  Item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model Session {
-  id                 Int       @id @default(autoincrement())
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime
-  expiresAt          DateTime?
-  handle             String    @unique
-  hashedSessionToken String?
-  antiCSRFToken      String?
-  publicData         String?
-  privateData        String?
-  userId             Int?
-  User               User?     @relation(fields: [userId], references: [id])
-}
-
-model Token {
+model GroceryTrip {
   id          Int       @id @default(autoincrement())
   createdAt   DateTime  @default(now())
-  updatedAt   DateTime
-  hashedToken String
-  type        TokenType
-  expiresAt   DateTime
-  sentTo      String
-  userId      Int
-  User        User      @relation(fields: [userId], references: [id])
-
-  @@unique([hashedToken, type])
-}
-
-model User {
-  id             Int           @id @default(autoincrement())
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime
-  firstName      String
-  lastName       String
-  email          String        @unique
-  hashedPassword String?
-  role           String        @default("USER")
-  GroceryTrip    GroceryTrip[]
-  Item           Item[]
-  Reminder       Reminder[]
-  Session        Session[]
-  Token          Token[]
+  updatedAt   DateTime  @updatedAt
+  name        String
+  description String    @default("")
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items       Item[]
+  receipts    Receipt[]
 }
 
 model Receipt {
   id            Int           @id @default(autoincrement())
   url           String
   createdAt     DateTime      @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime      @updatedAt
   groceryTripId Int?
-  status        ReceiptStatus @default(IMPORTED)
-  scrapedData   Json?
-  Item          Item[]
   GroceryTrip   GroceryTrip?  @relation(fields: [groceryTripId], references: [id], onDelete: Cascade)
+  items         Item[]
+  status        ReceiptStatus @default(PROCESSING)
+  scrapedData   Json?
+}
+
+model Reminder {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  time      DateTime
+  itemId    Int
+  userId    String
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum TokenType {
+  RESET_PASSWORD
 }
 
 enum ItemStatusType {
@@ -126,10 +195,6 @@ enum ItemStatusType {
   FRESH
   EATEN
   DISCARDED
-}
-
-enum TokenType {
-  RESET_PASSWORD
 }
 
 enum ReceiptStatus {

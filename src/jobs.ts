@@ -16,7 +16,7 @@ export interface ImageProcessJob {
 
 export interface DailyReporterJob {
   type: jobTypes.DAILY_REPORTER;
-  data: { id: number };
+  data: { id: string };
 }
 
 export type WorkerJob = ItemUpdateJob | ImageProcessJob | DailyReporterJob;
