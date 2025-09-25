@@ -1,25 +1,25 @@
 import {
-  type Item,
   ItemStatusType,
+  type Item,
   type ItemType,
   type User,
 } from "@prisma/client";
 import type { Job } from "bullmq";
-import { type WorkerJob, jobTypes } from "../jobs";
-import prisma from "../repository/prisma";
 import dayjs from "dayjs";
 import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
 import localizedFormat from "dayjs/plugin/localizedFormat";
 import mjml2html from "mjml";
 import { Resend } from "resend";
-import logger from "../utils/logger";
-import calculateUsageRate from "../utils/usageRate";
-import calculateTotalSavings from "../utils/totalSavings";
+import { jobTypes, type WorkerJob } from "../jobs";
+import prisma from "../repository/prisma";
 import type {
   RecipeInformation,
   RecipeResponse,
   UserPreferences,
 } from "../types";
+import logger from "../utils/logger";
+import calculateTotalSavings from "../utils/totalSavings";
+import calculateUsageRate from "../utils/usageRate";
 
 const resend = new Resend(process.env.RESEND_KEY);
 
@@ -93,8 +93,8 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
               `https://api.spoonacular.com/recipes/findByIngredients?ingredients=${encodeURI(
                 [...eatTheseFirst.slice(0, 3), ...itemsToRemove.slice(0, 3)]
                   .map((item) => item.itemTypes[0].name)
-                  .join(", ")
-              )}&number=1&apiKey=${process.env.SPOONTACULAR_KEY}`
+                  .join(", "),
+              )}&number=1&apiKey=${process.env.SPOONTACULAR_KEY}`,
             )
           : null;
 
@@ -104,15 +104,12 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
 
         const recipe = recipes?.[0];
         const recipeFullResponse = await fetch(
-          `https://api.spoonacular.com/recipes/${recipe?.id}/information&apiKey=${process.env.SPOONTACULAR_KEY}`
-        );
-        logger.info(
-          `https://api.spoonacular.com/recipes/${recipe?.id}/information&apiKey=${process.env.SPOONTACULAR_KEY}`
+          `https://api.spoonacular.com/recipes/${recipe?.id}/information&apiKey=${process.env.SPOONTACULAR_KEY}`,
         );
         const recipeFull = recipeFullResponse.ok
           ? ((await recipeFullResponse?.json()) as RecipeInformation)
           : null;
-        const { data, error } = await resend.emails.send({
+        const { error } = await resend.emails.send({
           from: "Broccoli Daily Updates <hello@getbroccoli.app>",
           to: [user.email],
           subject: `Pantry Report for ${dayjs().format("LL")}`,
@@ -142,21 +139,21 @@ const handleDailyReport = async (job: Job<WorkerJob>) => {
 
 function calculateItemsAtRisk(user: User & { items: CombinedItem[] }) {
   const itemsAtRisk = user.items.filter(
-    (item) => item.status !== ItemStatusType.BAD
+    (item) => item.status !== ItemStatusType.BAD,
   );
   const itemsToRemove = user.items.filter(
-    (item) => item.status === ItemStatusType.BAD
+    (item) => item.status === ItemStatusType.BAD,
   );
   const eatTheseFirst = itemsAtRisk.sort((a, b) => {
     const itemTypeA = a.itemTypes[0];
     const itemTypeB = b.itemTypes[0];
     const expirationDateA = dayjs(itemTypeA.createdAt).add(
       itemTypeA.suggested_life_span_seconds,
-      "seconds"
+      "seconds",
     );
     const expirationDateB = dayjs(itemTypeB.createdAt).add(
       itemTypeB.suggested_life_span_seconds,
-      "seconds"
+      "seconds",
     );
     if (expirationDateA.isSameOrBefore(expirationDateB)) {
       return -1;
@@ -191,7 +188,7 @@ function constructEmail({
           <mj-section padding="0">
             <mj-column>
               <mj-image src="https://placehold.co/300x180/8BC34A/FFFFFF?text=${encodeURI(
-                item.itemTypes[0].name
+                item.itemTypes[0].name,
               )}" padding="0" />
             </mj-column>
           </mj-section>
@@ -212,7 +209,7 @@ function constructEmail({
           </mj-section>
         </mj-wrapper>
       </mj-column>
-    `
+    `,
   );
 
   const formattedItemsToRemoveBlocks = itemsToRemove.slice(0, 3).map(
@@ -222,7 +219,7 @@ function constructEmail({
           <mj-section padding="0">
             <mj-column>
               <mj-image src="https://placehold.co/300x180/c3824a/FFFFFF?text=${encodeURI(
-                item.itemTypes[0].name
+                item.itemTypes[0].name,
               )}" padding="0" />
             </mj-column>
           </mj-section>
@@ -243,7 +240,7 @@ function constructEmail({
           </mj-section>
         </mj-wrapper>
       </mj-column>
-    `
+    `,
   );
   return mjml2html(`
 <mjml>
@@ -299,7 +296,7 @@ function constructEmail({
       background-color="#2a3448"
       padding="100px 0px">
     </mj-hero>
-  
+
     <!-- Main Heading -->
      ${
        splitIntoGroupsOfThree(formattedEatTheseFirstBlocks).length
@@ -320,9 +317,9 @@ function constructEmail({
           ${splitIntoGroupsOfThree(formattedEatTheseFirstBlocks).map(
             (items) => {
               return `<mj-section padding="20px 0">${items.join(
-                " "
+                " ",
               )}</mj-section>`;
-            }
+            },
           )}
     </mj-section>`
          : ""
@@ -347,14 +344,14 @@ function constructEmail({
           ${splitIntoGroupsOfThree(formattedItemsToRemoveBlocks).map(
             (items) => {
               return `<mj-section padding="20px 0">${items.join(
-                " "
+                " ",
               )}</mj-section>`;
-            }
+            },
           )}
     </mj-section>`
               : ""
           }
-   
+
      <mj-section>
       <mj-column>
            <mj-button background-color="#5c9841" href="getbroccoli.app/items">View your inventory</mj-button>

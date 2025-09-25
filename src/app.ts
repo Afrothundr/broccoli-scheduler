@@ -1,10 +1,10 @@
-import { Queue, type WorkerOptions, Worker, delay } from "bullmq";
+import { Queue, type WorkerOptions, Worker } from "bullmq";
 import cors from "cors";
 import dotenv from "dotenv";
 import express, { type Request } from "express";
 import cron from "node-cron";
 import { type WorkerJob, jobTypes } from "./jobs";
-import { QUEUE_TYPES, UserPreferences } from "./types";
+import * as types from "./types";
 import redis from "./redisConnection";
 import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
@@ -22,18 +22,18 @@ dotenv.config();
 
 export const redisOptions = {
   host: process.env.REDISHOST ?? "localhost",
-  port: Number.parseInt(process.env.REDISPORT ?? "6379"),
+  port: Number.parseInt(process.env.REDISPORT ?? "6379", 10),
   password: process.env.REDISPASSWORD,
 };
 
 const queues = {
-  itemUpdater: new Queue(QUEUE_TYPES.ITEM_UPDATER, {
+  itemUpdater: new Queue(types.QUEUE_TYPES.ITEM_UPDATER, {
     connection: redis.duplicate(),
   }),
-  imageProcessors: new Queue(QUEUE_TYPES.IMAGE_PROCESSOR, {
+  imageProcessors: new Queue(types.QUEUE_TYPES.IMAGE_PROCESSOR, {
     connection: redis.duplicate(),
   }),
-  dailyReporter: new Queue(QUEUE_TYPES.DAILY_REPORTER, {
+  dailyReporter: new Queue(types.QUEUE_TYPES.DAILY_REPORTER, {
     connection: redis.duplicate(),
   }),
 };
@@ -57,8 +57,8 @@ passport.use(
     (apiKey, done) =>
       process.env.API_KEYS?.includes(apiKey)
         ? done(null, true)
-        : done(null, false)
-  )
+        : done(null, false),
+  ),
 );
 
 const app = express();
@@ -68,13 +68,21 @@ const workerOptions: WorkerOptions = {
 };
 
 try {
-  new Worker(QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
-  new Worker(QUEUE_TYPES.IMAGE_PROCESSOR, handleImageProcess, workerOptions);
-  new Worker(QUEUE_TYPES.DAILY_REPORTER, handleDailyReport, workerOptions);
+  new Worker(types.QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
+  new Worker(
+    types.QUEUE_TYPES.IMAGE_PROCESSOR,
+    handleImageProcess,
+    workerOptions,
+  );
+  new Worker(
+    types.QUEUE_TYPES.DAILY_REPORTER,
+    handleDailyReport,
+    workerOptions,
+  );
   logger.info(
     "started worker",
-    QUEUE_TYPES.ITEM_UPDATER,
-    QUEUE_TYPES.IMAGE_PROCESSOR
+    types.QUEUE_TYPES.ITEM_UPDATER,
+    types.QUEUE_TYPES.IMAGE_PROCESSOR,
   );
 } catch (err) {
   logger.error(err);
@@ -104,36 +112,37 @@ const authMiddleware = () =>
       authMiddleware(),
       async (
         req: Request<{ ids: number[]; status: string; delay: number }>,
-        res
+        res,
       ) => {
         try {
           const { ids, status, delay } = req.body;
           logger.info(
             `adding job to item updater queue: ${ids} - ${dayjs()
               .add(delay, "millisecond")
-              .format("MM-DD-YYYY HH:mm:ss")}`
+              .format("MM-DD-YYYY HH:mm:ss")}`,
           );
           await addJobToItemUpdaterQueue(
             {
               type: jobTypes.ITEM_UPDATER,
               data: { ids, status },
             },
-            delay
+            delay,
           );
           res.status(200).json({
             queued: true,
           });
         } catch (err) {
+          logger.error("error in worker", err);
           return res.status(500).send("error in worker");
         }
-      }
+      },
     );
     app.post(
       "/receipts/process",
       authMiddleware(),
       async (
         req: Request<{ receiptId: number; url: string; delay: number }>,
-        res
+        res,
       ) => {
         try {
           const { receiptId, url, delay } = req.body;
@@ -142,15 +151,16 @@ const authMiddleware = () =>
               type: jobTypes.IMAGE_PROCESSOR,
               data: { receiptId, url },
             },
-            delay
+            delay,
           );
           res.status(200).json({
             queued: true,
           });
         } catch (err) {
+          logger.error("error in worker", err);
           return res.status(500).send("error in worker");
         }
-      }
+      },
     );
     app.post(
       "/receipts/callback",
@@ -170,12 +180,12 @@ const authMiddleware = () =>
           logger.error(err);
           return res.status(500).send("error in worker");
         }
-      }
+      },
     );
     app.post(
       "/reports/daily",
       authMiddleware(),
-      async (req: Request<{ userId: number; delay: number }>, res) => {
+      async (req: Request<{ userId: string; delay: number }>, res) => {
         try {
           const { userId: id, delay } = req.body;
           await addJobToDailyReportQueue(
@@ -183,24 +193,25 @@ const authMiddleware = () =>
               type: jobTypes.DAILY_REPORTER,
               data: { id },
             },
-            delay
+            delay,
           );
           res.status(200).json({
             queued: true,
           });
         } catch (err) {
+          logger.error(err);
           return res.status(500).send("error in worker");
         }
-      }
+      },
     );
     app.use("/admin/queues", serverAdapter.getRouter());
     app.use(passport.initialize());
     app.listen(process.env.PORT, async () => {
       logger.info(
-        `Server running at ${process.env.BASE_URL}:${process.env.PORT}`
+        `Server running at ${process.env.BASE_URL}:${process.env.PORT}`,
       );
       logger.info(
-        `For the UI, open ${process.env.BASE_URL}:${process.env.PORT}/admin/queues`
+        `For the UI, open ${process.env.BASE_URL}:${process.env.PORT}/admin/queues`,
       );
     });
     cron.schedule(
@@ -208,29 +219,45 @@ const authMiddleware = () =>
       async () => {
         logger.info("Starting daily reports queue");
         const users = await prisma.user.findMany();
-        users.map((user, index) => {
+        logger.info(`Found ${users.length} users`);
+        users.map(async (user, index) => {
           const preferences = (user.preferences ??
-            {}) as unknown as UserPreferences;
+            {}) as unknown as types.UserPreferences;
           if (!preferences?.notifications) {
             return;
           }
           switch (preferences?.emailFrequency) {
-            case "weekly":
+            case "weekly": {
               if (dayjs().day() !== 0) {
                 break;
               }
-            case "monthly":
-              if (dayjs().date() !== 1) {
-                break;
-              }
-            case "daily":
-            default:
-              addJobToDailyReportQueue(
+              return addJobToDailyReportQueue(
                 {
                   type: jobTypes.DAILY_REPORTER,
                   data: { id: user.id },
                 },
-                index * 5000
+                index * 5000,
+              );
+            }
+            case "monthly": {
+              if (dayjs().date() !== 1) {
+                break;
+              }
+              return addJobToDailyReportQueue(
+                {
+                  type: jobTypes.DAILY_REPORTER,
+                  data: { id: user.id },
+                },
+                index * 5000,
+              );
+            }
+            default:
+              return addJobToDailyReportQueue(
+                {
+                  type: jobTypes.DAILY_REPORTER,
+                  data: { id: user.id },
+                },
+                index * 5000,
               );
           }
         });
@@ -238,7 +265,7 @@ const authMiddleware = () =>
       {
         scheduled: true,
         timezone: "America/Chicago",
-      }
+      },
     );
   } catch (e) {
     logger.error("error on startup:", e);
