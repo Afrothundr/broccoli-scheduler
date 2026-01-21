@@ -24,6 +24,7 @@ export const redisOptions = {
   host: process.env.REDISHOST ?? "localhost",
   port: Number.parseInt(process.env.REDISPORT ?? "6379", 10),
   password: process.env.REDISPASSWORD,
+  family: 6,
 };
 
 const queues = {
