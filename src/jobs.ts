@@ -2,6 +2,7 @@ export enum jobTypes {
   ITEM_UPDATER = "Update Item Freshness",
   IMAGE_PROCESSOR = "Processes Image",
   DAILY_REPORTER = "Send Daily Report Email",
+  ITEM_REMOVER = "Remove Items from Queue",
 }
 
 export interface ItemUpdateJob {
@@ -19,4 +20,13 @@ export interface DailyReporterJob {
   data: { id: string };
 }
 
-export type WorkerJob = ItemUpdateJob | ImageProcessJob | DailyReporterJob;
+export interface ItemRemoverJob {
+  type: jobTypes.ITEM_REMOVER;
+  data: { ids: number[] };
+}
+
+export type WorkerJob =
+  | ItemUpdateJob
+  | ImageProcessJob
+  | DailyReporterJob
+  | ItemRemoverJob;

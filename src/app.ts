@@ -15,6 +15,7 @@ import updateReceipt, { type ScrapedItem } from "./workers/updateReceipt";
 import passport from "passport";
 import { HeaderAPIKeyStrategy } from "passport-headerapikey";
 import handleDailyReport from "./workers/handleDailyReport";
+import handleItemRemove from "./workers/handleItemRemove";
 import prisma from "./repository/prisma";
 import logger from "./utils/logger";
 import dayjs from "dayjs";
@@ -47,6 +48,7 @@ const initializeConnections = async () => {
 
   try {
     new Worker(types.QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
+    new Worker(types.QUEUE_TYPES.ITEM_UPDATER, handleItemRemove, workerOptions);
     new Worker(
       types.QUEUE_TYPES.IMAGE_PROCESSOR,
       handleImageProcess,
@@ -96,6 +98,7 @@ const workerOptions: WorkerOptions = {
 
 try {
   new Worker(types.QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
+  new Worker(types.QUEUE_TYPES.ITEM_UPDATER, handleItemRemove, workerOptions);
   new Worker(
     types.QUEUE_TYPES.IMAGE_PROCESSOR,
     handleImageProcess,
@@ -153,6 +156,33 @@ const authMiddleware = () =>
             {
               type: jobTypes.ITEM_UPDATER,
               data: { ids, status },
+            },
+            delay,
+          );
+          res.status(200).json({
+            queued: true,
+          });
+        } catch (err) {
+          logger.error("error in worker", err);
+          return res.status(500).send("error in worker");
+        }
+      },
+    );
+    app.post(
+      "/items/remove",
+      authMiddleware(),
+      async (req: Request<{ ids: number[]; delay: number }>, res) => {
+        try {
+          const { ids, delay } = req.body;
+          logger.info(
+            `adding job to item remover queue: ${ids} - ${dayjs()
+              .add(delay, "millisecond")
+              .format("MM-DD-YYYY HH:mm:ss")}`,
+          );
+          await addJobToItemUpdaterQueue(
+            {
+              type: jobTypes.ITEM_REMOVER,
+              data: { ids },
             },
             delay,
           );
