@@ -27,29 +27,56 @@ export const redisOptions = {
   family: 6,
 };
 
-const queues = {
-  itemUpdater: new Queue(types.QUEUE_TYPES.ITEM_UPDATER, {
-    connection: redis.duplicate(),
-  }),
-  imageProcessors: new Queue(types.QUEUE_TYPES.IMAGE_PROCESSOR, {
-    connection: redis.duplicate(),
-  }),
-  dailyReporter: new Queue(types.QUEUE_TYPES.DAILY_REPORTER, {
-    connection: redis.duplicate(),
-  }),
+let queues: {
+  itemUpdater: Queue<any, any, string>;
+  imageProcessors: Queue<any, any, string>;
+  dailyReporter: Queue<any, any, string>;
+};
+
+const initializeConnections = async () => {
+  queues = {
+    itemUpdater: new Queue(types.QUEUE_TYPES.ITEM_UPDATER, {
+      connection: redis.duplicate(),
+    }),
+    imageProcessors: new Queue(types.QUEUE_TYPES.IMAGE_PROCESSOR, {
+      connection: redis.duplicate(),
+    }),
+    dailyReporter: new Queue(types.QUEUE_TYPES.DAILY_REPORTER, {
+      connection: redis.duplicate(),
+    }),
+  };
+
+  try {
+    new Worker(types.QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
+    new Worker(
+      types.QUEUE_TYPES.IMAGE_PROCESSOR,
+      handleImageProcess,
+      workerOptions,
+    );
+    new Worker(
+      types.QUEUE_TYPES.DAILY_REPORTER,
+      handleDailyReport,
+      workerOptions,
+    );
+  } catch (err) {
+    logger.error("error in worker initialization", err);
+  }
+  // Initialize workers
+
+  createBullBoard({
+    queues: [
+      new BullMQAdapter(queues.itemUpdater),
+      new BullMQAdapter(queues.imageProcessors),
+      new BullMQAdapter(queues.dailyReporter),
+    ],
+    serverAdapter: serverAdapter,
+  });
+
+  logger.info("Workers and queues initialized");
 };
 
 const serverAdapter = new ExpressAdapter();
 serverAdapter.setBasePath("/admin/queues");
-
-createBullBoard({
-  queues: [
-    new BullMQAdapter(queues.itemUpdater),
-    new BullMQAdapter(queues.imageProcessors),
-    new BullMQAdapter(queues.dailyReporter),
-  ],
-  serverAdapter: serverAdapter,
-});
 
 passport.use(
   new HeaderAPIKeyStrategy(
@@ -107,6 +134,7 @@ const authMiddleware = () =>
 
 (async () => {
   try {
+    await initializeConnections();
     app.use(express.json(), cors());
     app.post(
       "/items/update",
