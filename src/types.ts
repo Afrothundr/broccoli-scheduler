@@ -2,6 +2,7 @@ export enum QUEUE_TYPES {
   ITEM_UPDATER = "itemUpdater",
   IMAGE_PROCESSOR = "imageProcessor",
   DAILY_REPORTER = "dailyReporter",
+  ITEM_REMOVER = "itemRemover",
 }
 
 export type RecipeResponse = {

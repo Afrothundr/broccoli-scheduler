@@ -15,6 +15,7 @@ import updateReceipt, { type ScrapedItem } from "./workers/updateReceipt";
 import passport from "passport";
 import { HeaderAPIKeyStrategy } from "passport-headerapikey";
 import handleDailyReport from "./workers/handleDailyReport";
+import handleItemRemove from "./workers/handleItemRemove";
 import prisma from "./repository/prisma";
 import logger from "./utils/logger";
 import dayjs from "dayjs";
@@ -30,6 +31,7 @@ let queues: {
   itemUpdater: Queue<any, any, string>;
   imageProcessors: Queue<any, any, string>;
   dailyReporter: Queue<any, any, string>;
+  itemRemover: Queue<any, any, string>;
 };
 
 const initializeConnections = async () => {
@@ -43,10 +45,14 @@ const initializeConnections = async () => {
     dailyReporter: new Queue(types.QUEUE_TYPES.DAILY_REPORTER, {
       connection: redis.duplicate(),
     }),
+    itemRemover: new Queue(types.QUEUE_TYPES.ITEM_REMOVER, {
+      connection: redis.duplicate(),
+    }),
   };
 
   try {
     new Worker(types.QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
+    new Worker(types.QUEUE_TYPES.ITEM_REMOVER, handleItemRemove, workerOptions);
     new Worker(
       types.QUEUE_TYPES.IMAGE_PROCESSOR,
       handleImageProcess,
@@ -67,6 +73,7 @@ const initializeConnections = async () => {
       new BullMQAdapter(queues.itemUpdater),
       new BullMQAdapter(queues.imageProcessors),
       new BullMQAdapter(queues.dailyReporter),
+      new BullMQAdapter(queues.itemRemover),
     ],
     serverAdapter: serverAdapter,
   });
@@ -94,27 +101,6 @@ const workerOptions: WorkerOptions = {
   connection: redisOptions,
 };
 
-try {
-  new Worker(types.QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
-  new Worker(
-    types.QUEUE_TYPES.IMAGE_PROCESSOR,
-    handleImageProcess,
-    workerOptions,
-  );
-  new Worker(
-    types.QUEUE_TYPES.DAILY_REPORTER,
-    handleDailyReport,
-    workerOptions,
-  );
-  logger.info(
-    "started worker",
-    types.QUEUE_TYPES.ITEM_UPDATER,
-    types.QUEUE_TYPES.IMAGE_PROCESSOR,
-  );
-} catch (err) {
-  logger.error(err);
-}
-
 // Utilities
 
 const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
@@ -125,6 +111,9 @@ const addJobToImageProcessingQueue = async (job: WorkerJob, delay: number) =>
 
 const addJobToDailyReportQueue = async (job: WorkerJob, delay: number) =>
   await queues.dailyReporter.add(job.type, job, { delay });
+
+const addJobToItemRemoverQueue = async (job: WorkerJob, delay: number) =>
+  await queues.itemRemover.add(job.type, job, { delay });
 
 const authMiddleware = () =>
   passport.authenticate("headerapikey", {
@@ -153,6 +142,33 @@ const authMiddleware = () =>
             {
               type: jobTypes.ITEM_UPDATER,
               data: { ids, status },
+            },
+            delay,
+          );
+          res.status(200).json({
+            queued: true,
+          });
+        } catch (err) {
+          logger.error("error in worker", err);
+          return res.status(500).send("error in worker");
+        }
+      },
+    );
+    app.post(
+      "/items/remove",
+      authMiddleware(),
+      async (req: Request<{ ids: number[]; delay: number }>, res) => {
+        try {
+          const { ids, delay } = req.body;
+          logger.info(
+            `adding job to item remover queue: ${ids} - ${dayjs()
+              .add(delay, "millisecond")
+              .format("MM-DD-YYYY HH:mm:ss")}`,
+          );
+          await addJobToItemRemoverQueue(
+            {
+              type: jobTypes.ITEM_REMOVER,
+              data: { ids },
             },
             delay,
           );
