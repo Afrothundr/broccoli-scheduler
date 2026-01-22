@@ -1,7 +1,6 @@
 import type { Job } from "bullmq";
 import { Queue } from "bullmq";
 import { type WorkerJob, jobTypes, type ItemUpdateJob } from "../jobs";
-import prisma from "../repository/prisma";
 import logger from "../utils/logger";
 import redis from "../redisConnection";
 import * as types from "../types";
