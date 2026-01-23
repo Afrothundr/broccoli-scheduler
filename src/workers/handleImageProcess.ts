@@ -11,17 +11,20 @@ const handleImageProcess = async (job: Job<WorkerJob>) => {
       const { receiptId, url } = job.data.data;
       try {
         logger.info(`Starting to process image: ${url}`);
-        const result = await fetch(`${process.env.IMAGE_PROCESSOR_URL}/ocr`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": process.env.IMAGE_PROCESSOR_API_KEY ?? "",
+        const result = await fetch(
+          `${process.env.environment === "local" ? "http" : "https"}://${process.env.IMAGE_PROCESSOR_URL}/ocr`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": process.env.IMAGE_PROCESSOR_API_KEY ?? "",
+            },
+            body: JSON.stringify({
+              url,
+              receiptId,
+            }),
           },
-          body: JSON.stringify({
-            url,
-            receiptId,
-          }),
-        });
+        );
         if (!result.ok) {
           const text = await result.text();
           throw new Error(text);
