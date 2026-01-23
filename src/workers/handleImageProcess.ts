@@ -2,7 +2,7 @@ import type { Job } from "bullmq";
 import { type WorkerJob, jobTypes } from "../jobs";
 import prisma from "../repository/prisma";
 import { ReceiptStatus } from "@prisma/client";
-import updateReceipt, { type ScrapedItem } from "./updateReceipt";
+import updateReceipt, { ScrapedResult } from "./updateReceipt";
 import logger from "../utils/logger";
 
 const handleImageProcess = async (job: Job<WorkerJob>) => {
@@ -27,7 +27,7 @@ const handleImageProcess = async (job: Job<WorkerJob>) => {
           throw new Error(text);
         }
         const { data } = await result.json();
-        const castedData = data as ScrapedItem[];
+        const castedData = data as ScrapedResult;
         await updateReceipt({
           receiptId,
           data: castedData,

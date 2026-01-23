@@ -11,7 +11,7 @@ import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 import handleItemUpdate from "./workers/handleItemUpdate";
 import handleImageProcess from "./workers/handleImageProcess";
-import updateReceipt, { type ScrapedItem } from "./workers/updateReceipt";
+import updateReceipt, { ScrapedResult } from "./workers/updateReceipt";
 import passport from "passport";
 import { HeaderAPIKeyStrategy } from "passport-headerapikey";
 import handleDailyReport from "./workers/handleDailyReport";
@@ -212,7 +212,7 @@ const authMiddleware = () =>
       async (req: Request<{ receiptId: number; data: unknown }>, res) => {
         try {
           const { receiptId, data } = req.body;
-          const castedData = data as ScrapedItem[];
+          const castedData = data as ScrapedResult;
           await updateReceipt({
             receiptId,
             data: castedData,
