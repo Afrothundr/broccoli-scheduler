@@ -16,6 +16,7 @@ import passport from "passport";
 import { HeaderAPIKeyStrategy } from "passport-headerapikey";
 import handleDailyReport from "./workers/handleDailyReport";
 import handleItemRemove from "./workers/handleItemRemove";
+import expireCoreItems from "./workers/expireCoreItems";
 import prisma from "./repository/prisma";
 import logger from "./utils/logger";
 import dayjs from "dayjs";
@@ -311,6 +312,19 @@ const authMiddleware = () =>
         timezone: "America/Chicago",
       },
     );
+    // Phase 3 expiration sweep (core PRD §7): hourly, on the quarter hour so
+    // it doesn't collide with the daily-reports run. Direct call, no queue —
+    // it's one idempotent HTTP request and the next hour self-heals a miss.
+    cron.schedule("15 * * * *", async () => {
+      try {
+        const expired = await expireCoreItems();
+        if (expired > 0) {
+          logger.info(`expiration sweep: ${expired} item(s) marked EXPIRED`);
+        }
+      } catch (err) {
+        logger.error("expiration sweep failed", err);
+      }
+    });
   } catch (e) {
     logger.error("error on startup:", e);
   }
