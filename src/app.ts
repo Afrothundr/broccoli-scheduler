@@ -17,6 +17,7 @@ import { HeaderAPIKeyStrategy } from "passport-headerapikey";
 import handleDailyReport from "./workers/handleDailyReport";
 import handleItemRemove from "./workers/handleItemRemove";
 import expireCoreItems from "./workers/expireCoreItems";
+import sendCoreNudges from "./workers/sendCoreNudges";
 import prisma from "./repository/prisma";
 import logger from "./utils/logger";
 import dayjs from "dayjs";
@@ -323,6 +324,22 @@ const authMiddleware = () =>
         }
       } catch (err) {
         logger.error("expiration sweep failed", err);
+      }
+    });
+    // Phase 4 nudge tick (core PRD §7): hourly at :20, right after the expiry
+    // sweep so freshly-EXPIRED items make it into the day's nudge. The api
+    // decides who's eligible (quiet hours, one nudge per local day) — the
+    // hourly tick just means each user is nudged at the first eligible hour.
+    cron.schedule("20 * * * *", async () => {
+      try {
+        const result = await sendCoreNudges();
+        if (result && result.usersNudged > 0) {
+          logger.info(
+            `nudge tick: ${result.usersNudged} user(s) nudged, ${result.messagesSent} message(s), ${result.tokensPruned} token(s) pruned`,
+          );
+        }
+      } catch (err) {
+        logger.error("nudge tick failed", err);
       }
     });
   } catch (e) {
