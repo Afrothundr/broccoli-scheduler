@@ -1,348 +1,54 @@
-import { Queue, type WorkerOptions, Worker } from "bullmq";
-import cors from "cors";
 import dotenv from "dotenv";
-import express, { type Request } from "express";
+import express from "express";
 import cron from "node-cron";
-import { type WorkerJob, jobTypes } from "./jobs";
-import * as types from "./types";
-import redis from "./redisConnection";
-import { createBullBoard } from "@bull-board/api";
-import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
-import { ExpressAdapter } from "@bull-board/express";
-import handleItemUpdate from "./workers/handleItemUpdate";
-import handleImageProcess from "./workers/handleImageProcess";
-import updateReceipt, { ScrapedResult } from "./workers/updateReceipt";
-import passport from "passport";
-import { HeaderAPIKeyStrategy } from "passport-headerapikey";
-import handleDailyReport from "./workers/handleDailyReport";
-import handleItemRemove from "./workers/handleItemRemove";
 import expireCoreItems from "./workers/expireCoreItems";
 import sendCoreNudges from "./workers/sendCoreNudges";
-import prisma from "./repository/prisma";
 import logger from "./utils/logger";
-import dayjs from "dayjs";
+
 dotenv.config();
 
-export const redisOptions = {
-  host: process.env.REDISHOST ?? "localhost",
-  port: Number.parseInt(process.env.REDISPORT ?? "6379", 10),
-  password: process.env.REDISPASSWORD,
-};
-
-let queues: {
-  itemUpdater: Queue<any, any, string>;
-  imageProcessors: Queue<any, any, string>;
-  dailyReporter: Queue<any, any, string>;
-  itemRemover: Queue<any, any, string>;
-};
-
-const initializeConnections = async () => {
-  queues = {
-    itemUpdater: new Queue(types.QUEUE_TYPES.ITEM_UPDATER, {
-      connection: redis.duplicate(),
-    }),
-    imageProcessors: new Queue(types.QUEUE_TYPES.IMAGE_PROCESSOR, {
-      connection: redis.duplicate(),
-    }),
-    dailyReporter: new Queue(types.QUEUE_TYPES.DAILY_REPORTER, {
-      connection: redis.duplicate(),
-    }),
-    itemRemover: new Queue(types.QUEUE_TYPES.ITEM_REMOVER, {
-      connection: redis.duplicate(),
-    }),
-  };
-
-  try {
-    new Worker(types.QUEUE_TYPES.ITEM_UPDATER, handleItemUpdate, workerOptions);
-    new Worker(types.QUEUE_TYPES.ITEM_REMOVER, handleItemRemove, workerOptions);
-    new Worker(
-      types.QUEUE_TYPES.IMAGE_PROCESSOR,
-      handleImageProcess,
-      workerOptions,
-    );
-    new Worker(
-      types.QUEUE_TYPES.DAILY_REPORTER,
-      handleDailyReport,
-      workerOptions,
-    );
-  } catch (err) {
-    logger.error("error in worker initialization", err);
-  }
-  // Initialize workers
-
-  createBullBoard({
-    queues: [
-      new BullMQAdapter(queues.itemUpdater),
-      new BullMQAdapter(queues.imageProcessors),
-      new BullMQAdapter(queues.dailyReporter),
-      new BullMQAdapter(queues.itemRemover),
-    ],
-    serverAdapter: serverAdapter,
-  });
-
-  logger.info("Workers and queues initialized");
-};
-
-const serverAdapter = new ExpressAdapter();
-serverAdapter.setBasePath("/admin/queues");
-
-passport.use(
-  new HeaderAPIKeyStrategy(
-    { header: "x-api-key", prefix: "api-key-" },
-    false,
-    (apiKey, done) =>
-      process.env.API_KEYS?.includes(apiKey)
-        ? done(null, true)
-        : done(null, false),
-  ),
-);
+// This service is a clock, nothing more. It owns no data and holds no queue:
+// every tick is one idempotent HTTP call to broccoli-api's token-gated
+// `internal.*` tRPC surface, which stays the single writer of record (PRD §4).
+// A missed tick self-heals on the next hour, so there is nothing to retry.
 
 const app = express();
 
-const workerOptions: WorkerOptions = {
-  connection: redisOptions,
-};
+// Railway needs a listening port and a healthcheck target; the crons above
+// are the actual work.
+app.get("/health", (_req, res) =>
+  res.status(200).json({ status: "ok", service: "broccoli-scheduler" }),
+);
 
-// Utilities
+app.listen(process.env.PORT ?? 3000, () => {
+  logger.info(`broccoli-scheduler listening on ${process.env.PORT ?? 3000}`);
+});
 
-const addJobToItemUpdaterQueue = async (job: WorkerJob, delay: number) =>
-  await queues.itemUpdater.add(job.type, job, { delay });
-
-const addJobToImageProcessingQueue = async (job: WorkerJob, delay: number) =>
-  await queues.imageProcessors.add(job.type, job, { delay });
-
-const addJobToDailyReportQueue = async (job: WorkerJob, delay: number) =>
-  await queues.dailyReporter.add(job.type, job, { delay });
-
-const addJobToItemRemoverQueue = async (job: WorkerJob, delay: number) =>
-  await queues.itemRemover.add(job.type, job, { delay });
-
-const authMiddleware = () =>
-  passport.authenticate("headerapikey", {
-    session: false,
-  });
-
-(async () => {
+// Phase 3 expiration sweep (core PRD §7): hourly, on the quarter hour.
+cron.schedule("15 * * * *", async () => {
   try {
-    await initializeConnections();
-    app.use(express.json(), cors());
-    app.post(
-      "/items/update",
-      authMiddleware(),
-      async (
-        req: Request<{ ids: number[]; status: string; delay: number }>,
-        res,
-      ) => {
-        try {
-          const { ids, status, delay } = req.body;
-          logger.info(
-            `adding job to item updater queue: ${ids} - ${dayjs()
-              .add(delay, "millisecond")
-              .format("MM-DD-YYYY HH:mm:ss")}`,
-          );
-          await addJobToItemUpdaterQueue(
-            {
-              type: jobTypes.ITEM_UPDATER,
-              data: { ids, status },
-            },
-            delay,
-          );
-          res.status(200).json({
-            queued: true,
-          });
-        } catch (err) {
-          logger.error("error in worker", err);
-          return res.status(500).send("error in worker");
-        }
-      },
-    );
-    app.post(
-      "/items/remove",
-      authMiddleware(),
-      async (req: Request<{ ids: number[]; delay: number }>, res) => {
-        try {
-          const { ids, delay } = req.body;
-          logger.info(
-            `adding job to item remover queue: ${ids} - ${dayjs()
-              .add(delay, "millisecond")
-              .format("MM-DD-YYYY HH:mm:ss")}`,
-          );
-          await addJobToItemRemoverQueue(
-            {
-              type: jobTypes.ITEM_REMOVER,
-              data: { ids },
-            },
-            delay,
-          );
-          res.status(200).json({
-            queued: true,
-          });
-        } catch (err) {
-          logger.error("error in worker", err);
-          return res.status(500).send("error in worker");
-        }
-      },
-    );
-    app.post(
-      "/receipts/process",
-      authMiddleware(),
-      async (
-        req: Request<{ receiptId: number; url: string; delay: number }>,
-        res,
-      ) => {
-        try {
-          const { receiptId, url, delay } = req.body;
-          await addJobToImageProcessingQueue(
-            {
-              type: jobTypes.IMAGE_PROCESSOR,
-              data: { receiptId, url },
-            },
-            delay,
-          );
-          res.status(200).json({
-            queued: true,
-          });
-        } catch (err) {
-          logger.error("error in worker", err);
-          return res.status(500).send("error in worker");
-        }
-      },
-    );
-    app.post(
-      "/receipts/callback",
-      authMiddleware(),
-      async (req: Request<{ receiptId: number; data: unknown }>, res) => {
-        try {
-          const { receiptId, data } = req.body;
-          const castedData = data as ScrapedResult;
-          await updateReceipt({
-            receiptId,
-            data: castedData,
-          });
-          res.status(200).json({
-            success: true,
-          });
-        } catch (err) {
-          logger.error(err);
-          return res.status(500).send("error in worker");
-        }
-      },
-    );
-    app.post(
-      "/reports/daily",
-      authMiddleware(),
-      async (req: Request<{ userId: string; delay: number }>, res) => {
-        try {
-          const { userId: id, delay } = req.body;
-          await addJobToDailyReportQueue(
-            {
-              type: jobTypes.DAILY_REPORTER,
-              data: { id },
-            },
-            delay,
-          );
-          res.status(200).json({
-            queued: true,
-          });
-        } catch (err) {
-          logger.error(err);
-          return res.status(500).send("error in worker");
-        }
-      },
-    );
-    app.use("/admin/queues", serverAdapter.getRouter());
-    app.use(passport.initialize());
-    app.listen(process.env.PORT, async () => {
-      logger.info(
-        `Server running at ${process.env.BASE_URL}:${process.env.PORT}`,
-      );
-      logger.info(
-        `For the UI, open ${process.env.BASE_URL}:${process.env.PORT}/admin/queues`,
-      );
-    });
-    cron.schedule(
-      "30 10 * * *",
-      async () => {
-        logger.info("Starting daily reports queue");
-        const users = await prisma.user.findMany();
-        logger.info(`Found ${users.length} users`);
-        users.map(async (user, index) => {
-          const preferences = (user.preferences ??
-            {}) as unknown as types.UserPreferences;
-          if (!preferences?.notifications) {
-            return;
-          }
-          switch (preferences?.emailFrequency) {
-            case "weekly": {
-              if (dayjs().day() !== 0) {
-                break;
-              }
-              return addJobToDailyReportQueue(
-                {
-                  type: jobTypes.DAILY_REPORTER,
-                  data: { id: user.id },
-                },
-                index * 5000,
-              );
-            }
-            case "monthly": {
-              if (dayjs().date() !== 1) {
-                break;
-              }
-              return addJobToDailyReportQueue(
-                {
-                  type: jobTypes.DAILY_REPORTER,
-                  data: { id: user.id },
-                },
-                index * 5000,
-              );
-            }
-            default:
-              return addJobToDailyReportQueue(
-                {
-                  type: jobTypes.DAILY_REPORTER,
-                  data: { id: user.id },
-                },
-                index * 5000,
-              );
-          }
-        });
-      },
-      {
-        scheduled: true,
-        timezone: "America/Chicago",
-      },
-    );
-    // Phase 3 expiration sweep (core PRD §7): hourly, on the quarter hour so
-    // it doesn't collide with the daily-reports run. Direct call, no queue —
-    // it's one idempotent HTTP request and the next hour self-heals a miss.
-    cron.schedule("15 * * * *", async () => {
-      try {
-        const expired = await expireCoreItems();
-        if (expired > 0) {
-          logger.info(`expiration sweep: ${expired} item(s) marked EXPIRED`);
-        }
-      } catch (err) {
-        logger.error("expiration sweep failed", err);
-      }
-    });
-    // Phase 4 nudge tick (core PRD §7): hourly at :20, right after the expiry
-    // sweep so freshly-EXPIRED items make it into the day's nudge. The api
-    // decides who's eligible (quiet hours, one nudge per local day) — the
-    // hourly tick just means each user is nudged at the first eligible hour.
-    cron.schedule("20 * * * *", async () => {
-      try {
-        const result = await sendCoreNudges();
-        if (result && result.usersNudged > 0) {
-          logger.info(
-            `nudge tick: ${result.usersNudged} user(s) nudged, ${result.messagesSent} message(s), ${result.tokensPruned} token(s) pruned`,
-          );
-        }
-      } catch (err) {
-        logger.error("nudge tick failed", err);
-      }
-    });
-  } catch (e) {
-    logger.error("error on startup:", e);
+    const expired = await expireCoreItems();
+    if (expired > 0) {
+      logger.info(`expiration sweep: ${expired} item(s) marked EXPIRED`);
+    }
+  } catch (err) {
+    logger.error("expiration sweep failed", err);
   }
-})();
+});
+
+// Phase 4 nudge tick (core PRD §7): hourly at :20, right after the expiry
+// sweep so freshly-EXPIRED items make it into the day's nudge. The api
+// decides who's eligible (quiet hours, one nudge per local day) — the
+// hourly tick just means each user is nudged at the first eligible hour.
+cron.schedule("20 * * * *", async () => {
+  try {
+    const result = await sendCoreNudges();
+    if (result && result.usersNudged > 0) {
+      logger.info(
+        `nudge tick: ${result.usersNudged} user(s) nudged, ${result.messagesSent} message(s), ${result.tokensPruned} token(s) pruned`,
+      );
+    }
+  } catch (err) {
+    logger.error("nudge tick failed", err);
+  }
+});
