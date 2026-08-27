@@ -3,6 +3,7 @@ import express from "express";
 import cron from "node-cron";
 import expireCoreItems from "./workers/expireCoreItems";
 import sendCoreNudges from "./workers/sendCoreNudges";
+import sendCoreMealNudges from "./workers/sendMealNudges";
 import logger from "./utils/logger";
 
 dotenv.config();
@@ -50,5 +51,22 @@ cron.schedule("20 * * * *", async () => {
     }
   } catch (err) {
     logger.error("nudge tick failed", err);
+  }
+});
+
+// Meal-window tick (PRD Pillar 4): every 5 minutes so meal prompts land
+// within ±5 min of the user's chosen time. The api decides which windows are
+// due (per-day-of-week, idempotent per local day) — this is just the clock,
+// same shape as the hourly nudges above.
+cron.schedule("*/5 * * * *", async () => {
+  try {
+    const result = await sendCoreMealNudges();
+    if (result && result.mealsFired > 0) {
+      logger.info(
+        `meal tick: ${result.mealsFired} meal(s) fired, ${result.messagesSent} message(s), ${result.tokensPruned} token(s) pruned`,
+      );
+    }
+  } catch (err) {
+    logger.error("meal tick failed", err);
   }
 });
